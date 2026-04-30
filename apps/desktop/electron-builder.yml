@@ -23,10 +23,30 @@ mac:
       arch:
         - x64
         - arm64
-  artifactName: "Tday-${version}-${arch}.${ext}"
+  artifactName: "Tday-${version}-mac-${arch}.${ext}"
   hardenedRuntime: false
   gatekeeperAssess: false
   identity: null
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: zip
+      arch:
+        - x64
+  artifactName: "Tday-${version}-win-${arch}.${ext}"
+linux:
+  category: Development
+  executableName: Tday
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: tar.gz
+      arch:
+        - x64
+  artifactName: "Tday-${version}-linux-${arch}.${ext}"
 dmg:
-  artifactName: "Tday-${version}-${arch}.${ext}"
+  artifactName: "Tday-${version}-mac-${arch}.${ext}"
   writeUpdateInfo: false

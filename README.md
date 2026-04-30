@@ -259,6 +259,10 @@ pnpm --filter @tday/desktop build
 
 # create macOS packages locally (.dmg + .zip for x64 and arm64)
 pnpm --filter @tday/desktop package:mac
+
+# create Windows and Linux packages locally on their native hosts
+pnpm --filter @tday/desktop package:win
+pnpm --filter @tday/desktop package:linux
 ```
 
 Local packaging writes artifacts to `apps/desktop/release/<version>/`.
@@ -268,8 +272,8 @@ Those generated files are ignored by git and are not meant to be committed.
 
 The repository ships with `.github/workflows/release.yml`.
 
-- Push to `main`: builds the macOS installers on GitHub Actions and uploads them as workflow artifacts.
-- Push a tag like `v0.1.12`: builds installers and publishes them to a GitHub Release automatically.
+- Push to `main`: builds macOS (`x64`, `arm64`), Windows (`x64`), and Linux (`x64`) packages on GitHub Actions and uploads them as workflow artifacts.
+- Push a tag like `v0.1.12`: builds the same cross-platform artifacts and publishes them to a GitHub Release automatically.
 - Run the workflow manually: builds artifacts on demand; if `publish` is enabled, it creates a draft GitHub Release.
 
 The CI packaging step uses `electron-builder --publish never`, so the build pipeline uploads release assets to GitHub Releases only and does not push packaged binaries back to the repository.

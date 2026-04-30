@@ -31,16 +31,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-mac:
-    name: build macos (${{ matrix.arch }})
+  build:
+    name: build ${{ matrix.label }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch: arm64
+          - label: macos arm64
+            platform: mac
+            arch: arm64
             runner: macos-14
-          - arch: x64
+          - label: macos x64
+            platform: mac
+            arch: x64
             runner: macos-13
+          - label: windows x64
+            platform: win
+            arch: x64
+            runner: windows-2022
+          - label: linux x64
+            platform: linux
+            arch: x64
+            runner: ubuntu-22.04
     runs-on: ${{ matrix.runner }}
     env:
       ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
@@ -60,6 +72,13 @@ jobs:
           node-version: '20'
           cache: 'pnpm'
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Show Python version
+        run: python --version
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -69,28 +88,28 @@ jobs:
       - name: Build renderer + main
         run: pnpm --filter @tday/desktop build
 
-      - name: Package (mac ${{ matrix.arch }})
-        run: pnpm --filter @tday/desktop exec electron-builder --mac --${{ matrix.arch }} -c electron-builder.yml --publish never
+      - name: Package (${{ matrix.platform }} ${{ matrix.arch }})
+        run: pnpm --filter @tday/desktop exec electron-builder --${{ matrix.platform }} --${{ matrix.arch }} -c electron-builder.yml --publish never
 
       - name: Collect artifacts
         shell: bash
         run: |
           mkdir -p dist-artifacts
-          find apps/desktop/release -maxdepth 3 -type f \
-            \( -name 'Tday-*.dmg' -o -name 'Tday-*.zip' \) \
+          find apps/desktop/release -type f \
+            \( -name 'Tday-*.dmg' -o -name 'Tday-*.zip' -o -name 'Tday-*.exe' -o -name 'Tday-*.AppImage' -o -name 'Tday-*.tar.gz' \) \
             -exec cp {} dist-artifacts/ \;
           ls -la dist-artifacts
 
       - uses: actions/upload-artifact@v4
         with:
-          name: tday-${{ github.run_id }}-macos-${{ matrix.arch }}
+          name: tday-${{ github.run_id }}-${{ matrix.platform }}-${{ matrix.arch }}
           path: dist-artifacts/*
           if-no-files-found: error
           retention-days: 14
 
   publish:
     name: publish github release
-    needs: build-mac
+    needs: build
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
     runs-on: ubuntu-22.04
     steps:

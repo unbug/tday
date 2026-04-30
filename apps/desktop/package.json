@@ -3,11 +3,14 @@
   "version": "0.1.12",
   "private": true,
   "description": "Tday desktop app",
+  "author": "unbug",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "package:mac": "electron-builder --mac --x64 --arm64 -c electron-builder.yml",
+    "package:win": "electron-builder --win --x64 -c electron-builder.yml",
+    "package:linux": "electron-builder --linux --x64 -c electron-builder.yml",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
