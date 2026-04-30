@@ -10,7 +10,7 @@
       width="1200"
       height="800"
       alt="Tday Demo Video on X"
-      src="https://github.com/user-attachments/assets/54e40ca6-f27b-46cb-b2c0-c2b71540486e"
+      src="https://github.com/user-attachments/assets/5d7ac6d9-cf0a-4eb3-b865-71ffbd11806b"
     />
   </a>
 </p>
