@@ -1,0 +1,11 @@
+[package]
+name = "tday-core"
+version = "0.1.0"
+edition = "2021"
+description = "Tday core: detection, tokenization, memory."
+
+[[bin]]
+name = "tday-core"
+path = "src/main.rs"
+
+[dependencies]

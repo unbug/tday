@@ -1,0 +1,149 @@
+@import '@xterm/xterm/css/xterm.css';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .input {
+    @apply w-full rounded-md border border-zinc-800 bg-zinc-900/80 px-3 py-1.5 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-fuchsia-500/60 focus:ring-1 focus:ring-fuchsia-500/40;
+  }
+}
+
+/* --- themed scrollbars (everywhere) ----------------------------------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(82, 82, 91, 0.6) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(82, 82, 91, 0.55);
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(168, 85, 247, 0.55);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+.scroll-themed::-webkit-scrollbar-thumb {
+  background: rgba(82, 82, 91, 0.55);
+}
+
+/*
+ * xterm.js renders its scrollbar inside the .xterm-viewport. The viewport's
+ * own background was painting an opaque block over the rightmost text
+ * column. Keep the scrollbar visible but make the viewport background
+ * transparent so the terminal output shows through underneath, and reserve
+ * a stable scrollbar gutter so layout doesn't shift when scrollback grows.
+ */
+.xterm .xterm-viewport {
+  scrollbar-gutter: stable;
+  background-color: transparent !important;
+}
+.xterm .xterm-viewport::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+  background: transparent;
+}
+.xterm .xterm-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+.xterm .xterm-viewport::-webkit-scrollbar-thumb {
+  background: rgba(82, 82, 91, 0.55);
+  border-radius: 9999px;
+}
+.xterm .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: rgba(168, 85, 247, 0.55);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, sans-serif;
+}
+
+/* --- border-beam: a light port of magicui's effect ---------------------- */
+.border-beam {
+  position: relative;
+  isolation: isolate;
+}
+.border-beam::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(
+    from var(--beam-angle, 0deg),
+    transparent 0deg,
+    rgba(168, 85, 247, 0.9) 30deg,
+    rgba(56, 189, 248, 0.9) 60deg,
+    transparent 90deg,
+    transparent 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  animation: beam-spin 6s linear infinite;
+  pointer-events: none;
+}
+@property --beam-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes beam-spin {
+  to {
+    --beam-angle: 360deg;
+  }
+}
+
+/* drag region for frameless macOS title bar */
+.drag {
+  -webkit-app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* --- logo: pill-shaped border-beam wrapping the "Tday" wordmark -------- */
+.logo-beam {
+  position: relative;
+  isolation: isolate;
+  background:
+    linear-gradient(#0a0a0f, #0a0a0f) padding-box,
+    conic-gradient(
+      from var(--logo-angle, 0deg),
+      #a855f7 0deg,
+      #38bdf8 120deg,
+      #f472b6 240deg,
+      #a855f7 360deg
+    ) border-box;
+  border: 1.5px solid transparent;
+  animation: logo-spin 5s linear infinite;
+  box-shadow:
+    0 0 18px rgba(168, 85, 247, 0.35),
+    0 0 36px rgba(56, 189, 248, 0.15);
+}
+@property --logo-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes logo-spin {
+  to {
+    --logo-angle: 360deg;
+  }
+}

@@ -1,0 +1,32 @@
+appId: com.tday.app
+productName: Tday
+directories:
+  output: release/${version}
+  buildResources: build
+files:
+  - out/**
+  - package.json
+  - "!**/{.DS_Store,.git,*.map}"
+  - "!**/node_modules/*/{CHANGELOG.md,README.md,readme.md,readme}"
+asar: true
+asarUnpack:
+  - "**/node_modules/node-pty/**/*"
+mac:
+  category: public.app-category.developer-tools
+  icon: build/icon.icns
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+    - target: zip
+      arch:
+        - x64
+        - arm64
+  artifactName: "Tday-${version}-${arch}.${ext}"
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  identity: null
+dmg:
+  artifactName: "Tday-${version}-${arch}.${ext}"
+  writeUpdateInfo: false

@@ -1,0 +1,26 @@
+{
+  "name": "tday",
+  "version": "0.1.12",
+  "private": true,
+  "description": "The Ultimate Harness Agent Launcher",
+  "packageManager": "pnpm@10.33.2",
+  "scripts": {
+    "dev": "pnpm --filter @tday/desktop dev",
+    "build": "pnpm --filter @tday/desktop build",
+    "package": "pnpm --filter @tday/desktop build && pnpm --filter @tday/desktop package:mac",
+    "release": "node scripts/release.mjs",
+    "build:core": "cd crates/tday-core && cargo build --release",
+    "typecheck": "pnpm -r --parallel typecheck",
+    "lint": "pnpm -r --parallel lint"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild",
+      "node-pty"
+    ]
+  }
+}

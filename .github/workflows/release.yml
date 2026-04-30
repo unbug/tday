@@ -1,0 +1,111 @@
+name: release
+
+# Builds Tday installers and uploads them as workflow artifacts. Pushes to
+# `main` perform an automated build only. Tag pushes that match `v*.*.*`
+# also attach the installers to a GitHub Release.
+#
+# Triggers:
+#   - push to main                -> build + upload workflow artifacts
+#   - push of a tag like v0.1.12  -> build + publish release
+#   - manual dispatch from Actions -> build only (or draft release if
+#                                     `publish` is checked)
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Create a draft GitHub Release with the artifacts'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-mac:
+    name: build macos (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-14
+          - arch: x64
+            runner: macos-13
+    runs-on: ${{ matrix.runner }}
+    env:
+      ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+      ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
+      # Match the local config (`identity: null` in electron-builder.yml):
+      # don't try to discover or use a Developer-ID signing identity.
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Build renderer + main
+        run: pnpm --filter @tday/desktop build
+
+      - name: Package (mac ${{ matrix.arch }})
+        run: pnpm --filter @tday/desktop exec electron-builder --mac --${{ matrix.arch }} -c electron-builder.yml --publish never
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir -p dist-artifacts
+          find apps/desktop/release -maxdepth 3 -type f \
+            \( -name 'Tday-*.dmg' -o -name 'Tday-*.zip' \) \
+            -exec cp {} dist-artifacts/ \;
+          ls -la dist-artifacts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tday-${{ github.run_id }}-macos-${{ matrix.arch }}
+          path: dist-artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: publish github release
+    needs: build-mac
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List downloaded files
+        run: ls -la dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('v0.0.0-manual-{0}', github.run_number) }}
+          name: ${{ github.ref_type == 'tag' && github.ref_name || format('Manual build #{0}', github.run_number) }}
+          draft: ${{ github.event_name == 'workflow_dispatch' }}
+          generate_release_notes: true
+          files: dist/*
