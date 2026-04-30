@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, shell, dialog, Menu } from 'electron';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { electronApp, optimizer, is } from '@electron-toolkit/utils';
 import { spawn as spawnPty, type IPty } from 'node-pty';
 import { spawn as spawnChild, execFileSync } from 'node:child_process';
@@ -251,6 +251,39 @@ function detectGeneric(bin: string): { available: boolean; version?: string; err
   } catch {
     return { available: false };
   }
+}
+
+function resolveExecutable(
+  bin: string,
+  env: NodeJS.ProcessEnv,
+): { requested: string; resolved: string | null } {
+  if (isAbsolute(bin)) {
+    return { requested: bin, resolved: existsSync(bin) ? bin : null };
+  }
+
+  for (const dir of (env.PATH ?? '').split(':')) {
+    if (!dir) continue;
+    const candidate = join(dir, bin);
+    if (existsSync(candidate)) {
+      return { requested: bin, resolved: candidate };
+    }
+  }
+
+  try {
+    const resolved = execFileSync('which', [bin], {
+      encoding: 'utf8',
+      env,
+      timeout: 2_000,
+    }).trim();
+    return { requested: bin, resolved: resolved || null };
+  } catch {
+    return { requested: bin, resolved: null };
+  }
+}
+
+function normalizeLaunchCwd(cwd: string | undefined): string {
+  if (cwd && existsSync(cwd)) return cwd;
+  return homedir();
 }
 
 /**
@@ -559,7 +592,7 @@ function registerIpc(): void {
 
     // Make sure pi's bundled tools (especially `fd`) won't try to download
     // from a stale URL — see ensureFd() docs.
-    const cwd = req.cwd ?? homedir();
+    const cwd = normalizeLaunchCwd(req.cwd);
     const baseEnv = { ...process.env };
     await ensureFd(baseEnv);
 
@@ -582,7 +615,7 @@ function registerIpc(): void {
       cmd = launch.cmd;
       args = launch.args;
       env = launch.env;
-      launchCwd = launch.cwd;
+      launchCwd = normalizeLaunchCwd(launch.cwd);
     } else {
       // Generic launch: just exec the binary with extra args; provider env
       // vars are projected through the same conventions as Pi.
@@ -608,10 +641,20 @@ function registerIpc(): void {
       );
       args = [...modelArgs, ...userArgs];
       env = piLike.env;
-      launchCwd = piLike.cwd;
+      launchCwd = normalizeLaunchCwd(piLike.cwd);
     }
 
-    const pty = spawnPty(cmd, args, {
+    const resolved = resolveExecutable(cmd, env);
+    if (!resolved.resolved) {
+      const pathPreview = (env.PATH ?? '').split(':').filter(Boolean).slice(0, 8).join(':');
+      throw new Error(
+        `executable not found: ${resolved.requested}\n` +
+          `cwd: ${launchCwd}\n` +
+          `PATH: ${pathPreview}${(env.PATH ?? '').includes(':') ? ':…' : ''}`,
+      );
+    }
+
+    const pty = spawnPty(resolved.resolved, args, {
       name: 'xterm-256color',
       cols: req.cols,
       rows: req.rows,

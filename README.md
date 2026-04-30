@@ -2,7 +2,18 @@
 
 > One terminal launcher for every coding-agent harness — Claude Code, Codex, OpenCode, Pi, and more. Browser-style tabs, unified provider config, auto-detected local inference, long-term memory, and cross-agent token analytics.
 
-[![status](https://img.shields.io/badge/status-alpha-orange)]() [![v0.1.8](https://img.shields.io/badge/release-v0.1.8-blue)]()
+[![status](https://img.shields.io/badge/status-alpha-orange)]() [![v0.1.12](https://img.shields.io/badge/release-v0.1.12-blue)]()
+
+<p align="center">
+  <a href="https://x.com/i/status/2049935301808935356">
+    <img
+      width="1200"
+      height="800"
+      alt="Tday Demo Video on X"
+      src="https://github.com/user-attachments/assets/68b9d545-877e-40e3-a85d-bf46c7e545ae"
+    />
+  </a>
+</p>
 
 
 ---
