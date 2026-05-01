@@ -1,6 +1,6 @@
 {
   "name": "@tday/shared",
-  "version": "0.1.34",
+  "version": "0.1.35",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
