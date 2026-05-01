@@ -31,7 +31,9 @@ export const PiAdapter = {
 
   detect(bin = 'pi'): { available: boolean; version?: string; path?: string } {
     try {
-      const path = execFileSync('which', [bin], { encoding: 'utf8' }).trim();
+      // `where` on Windows, `which` on POSIX
+      const whichCmd = process.platform === 'win32' ? 'where' : 'which';
+      const path = execFileSync(whichCmd, [bin], { encoding: 'utf8' }).split(/\r?\n/)[0].trim();
       let version: string | undefined;
       try {
         version = execFileSync(path, ['--version'], {

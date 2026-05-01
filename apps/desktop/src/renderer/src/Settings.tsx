@@ -20,6 +20,7 @@ interface Props {
 }
 
 type Section = 'providers' | 'agents' | 'usage';
+type UsageDateMode = 'today' | '7d' | '30d' | '90d' | 'custom';
 
 export function Settings({ open, onClose, onSaved }: Props) {
   const [section, setSection] = useState<Section>('providers');
@@ -32,7 +33,9 @@ export function Settings({ open, onClose, onSaved }: Props) {
   // Per-profile probe results: profileId -> { models, latencyMs, ok, probing }
   const [probeState, setProbeState] = useState<Record<string, { models: string[]; latencyMs: number; ok: boolean; probing: boolean; error?: string }>>({});
   const [usageData, setUsageData] = useState<UsageSummary | null>(null);
-  const [usageRange, setUsageRange] = useState<7 | 30 | 90>(30);
+  const [usageDateMode, setUsageDateMode] = useState<UsageDateMode>('30d');
+  const [usageCustomFrom, setUsageCustomFrom] = useState('');
+  const [usageCustomTo, setUsageCustomTo] = useState('');
   const [usageAgentId, setUsageAgentId] = useState('');
   // Ref for debounced probe timer — must be declared before any early return
   const probeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -67,9 +70,21 @@ export function Settings({ open, onClose, onSaved }: Props) {
     setActiveId((cur) => cur || c.default || c.profiles[0]?.id || '');
   };
 
-  const loadUsage = async (range: number, agentId: string) => {
-    const filter: UsageFilter = { fromTs: Date.now() - range * 24 * 60 * 60 * 1000 };
+  const loadUsage = async (mode: UsageDateMode, customFrom: string, customTo: string, agentId: string) => {
+    const now = Date.now();
+    const todayStart = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); })();
+    const filter: UsageFilter = {};
     if (agentId) filter.agentId = agentId;
+    switch (mode) {
+      case 'today': filter.fromTs = todayStart; break;
+      case '7d':    filter.fromTs = now - 7 * 86400000; break;
+      case '30d':   filter.fromTs = now - 30 * 86400000; break;
+      case '90d':   filter.fromTs = now - 90 * 86400000; break;
+      case 'custom':
+        if (customFrom) filter.fromTs = new Date(customFrom).getTime();
+        if (customTo) { const d = new Date(customTo); d.setHours(23, 59, 59, 999); filter.toTs = d.getTime(); }
+        break;
+    }
     try {
       const summary = await window.tday.queryUsage(filter);
       setUsageData(summary);
@@ -91,9 +106,9 @@ export function Settings({ open, onClose, onSaved }: Props) {
 
   // Load usage stats when usage section is active.
   useEffect(() => {
-    if (section === 'usage') void loadUsage(usageRange, usageAgentId);
+    if (section === 'usage') void loadUsage(usageDateMode, usageCustomFrom, usageCustomTo, usageAgentId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [section, usageRange, usageAgentId]);
+  }, [section, usageDateMode, usageCustomFrom, usageCustomTo, usageAgentId]);
 
   const profile = useMemo(
     () => cfg?.profiles.find((p) => p.id === activeId) ?? null,
@@ -728,38 +743,55 @@ export function Settings({ open, onClose, onSaved }: Props) {
           ) : section === 'usage' ? (
             <div className="scroll-themed flex-1 overflow-y-auto p-5 text-xs">
               {/* Filters */}
-              <div className="mb-4 flex flex-wrap items-center gap-3">
-                <div className="flex gap-1">
-                  {([7, 30, 90] as const).map((d) => (
+              <div className="mb-4 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {(['today', '7d', '30d', '90d', 'custom'] as const).map((mode) => (
                     <button
-                      key={d}
-                      onClick={() => setUsageRange(d)}
+                      key={mode}
+                      onClick={() => setUsageDateMode(mode)}
                       className={`rounded-md px-2.5 py-1 text-[11px] transition-colors ${
-                        usageRange === d
+                        usageDateMode === mode
                           ? 'bg-fuchsia-500/20 text-fuchsia-200'
                           : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800'
                       }`}
                     >
-                      {d}d
+                      {mode === 'today' ? 'Today' : mode === 'custom' ? 'Custom…' : mode}
                     </button>
                   ))}
+                  <select
+                    className="input h-6 py-0 text-[11px]"
+                    value={usageAgentId}
+                    onChange={(e) => setUsageAgentId(e.target.value)}
+                  >
+                    <option value="">All agents</option>
+                    {agents.map((a) => (
+                      <option key={a.id} value={a.id}>{a.displayName}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => void loadUsage(usageDateMode, usageCustomFrom, usageCustomTo, usageAgentId)}
+                    className="rounded-md px-2.5 py-1 text-[11px] bg-zinc-900 text-zinc-400 hover:bg-zinc-800"
+                  >
+                    Refresh
+                  </button>
                 </div>
-                <select
-                  className="input h-6 py-0 text-[11px]"
-                  value={usageAgentId}
-                  onChange={(e) => setUsageAgentId(e.target.value)}
-                >
-                  <option value="">All agents</option>
-                  {agents.map((a) => (
-                    <option key={a.id} value={a.id}>{a.displayName}</option>
-                  ))}
-                </select>
-                <button
-                  onClick={() => void loadUsage(usageRange, usageAgentId)}
-                  className="rounded-md px-2.5 py-1 text-[11px] bg-zinc-900 text-zinc-400 hover:bg-zinc-800"
-                >
-                  Refresh
-                </button>
+                {usageDateMode === 'custom' ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={usageCustomFrom}
+                      onChange={(e) => setUsageCustomFrom(e.target.value)}
+                      className="input-date h-6 py-0 text-[11px]"
+                    />
+                    <span className="text-zinc-500">–</span>
+                    <input
+                      type="date"
+                      value={usageCustomTo}
+                      onChange={(e) => setUsageCustomTo(e.target.value)}
+                      className="input-date h-6 py-0 text-[11px]"
+                    />
+                  </div>
+                ) : null}
               </div>
 
               {usageData ? (
@@ -769,7 +801,9 @@ export function Settings({ open, onClose, onSaved }: Props) {
                     <StatCard label="Total tokens" value={fmtNum(usageData.totalInputTokens + usageData.totalOutputTokens)}
                       sub={`${fmtNum(usageData.totalInputTokens)} in · ${fmtNum(usageData.totalOutputTokens)} out`}
                     />
-                    <StatCard label="Requests" value={String(usageData.totalRequests)} />
+                    <StatCard label="Requests" value={String(usageData.totalRequests)}
+                      sub={usageData.totalToolCalls > 0 ? `${fmtNum(usageData.totalToolCalls)} tool calls · ${(usageData.totalToolCalls / usageData.totalRequests).toFixed(1)}/req` : undefined}
+                    />
                     <StatCard
                       label="Est. cost"
                       value={
@@ -780,13 +814,23 @@ export function Settings({ open, onClose, onSaved }: Props) {
                           : `$${usageData.costUsd.toFixed(4)}`
                       }
                     />
+                    <StatCard
+                      label="Cache hit"
+                      value={`${(usageData.cacheHitRate * 100).toFixed(1)}%`}
+                      sub={`${fmtNum(usageData.totalCachedTokens)} cached`}
+                    />
+                    <StatCard
+                      label="Throughput"
+                      value={`${fmtNum(usageData.throughputTokensPerMin)} tok/min`}
+                      sub={`${usageData.throughputReqPerDay.toFixed(1)} req/d`}
+                    />
                   </div>
 
                   {/* Daily bar chart */}
                   {usageData.daily.length > 0 ? (
                     <div className="mb-4">
                       <div className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">
-                        Daily tokens ({usageRange}d)
+                        Daily tokens ({usageDateMode === 'today' ? 'today' : usageDateMode === 'custom' ? 'custom range' : usageDateMode})
                       </div>
                       <DailyBarChart data={usageData.daily} />
                     </div>

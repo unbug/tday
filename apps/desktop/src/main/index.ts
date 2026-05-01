@@ -32,67 +32,96 @@ import {
 import { createLocalGatewayManager } from './gateway';
 import { discoverLocalServices } from './discovery/index.js';
 import { probeBaseUrl } from './discovery/probe.js';
-import { appendUsage, queryUsage } from './usage/store.js';
+import { appendUsage, loadUsageRecords, computeUsageSummary } from './usage/store.js';
+import { SESSION_FILE_AGENTS } from './usage/session-readers/index.js';
+import { loadCachedSessionRecords, triggerSessionCacheRefresh } from './usage/session-cache.js';
 
 const TDAY_DIR = join(homedir(), '.tday');
 const localGatewayManager = createLocalGatewayManager();
 
 /**
- * Augment process.env.PATH with common locations where Node toolchains live
- * on macOS. When the app is launched from Finder, GUI processes inherit a
- * minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`) that misses Homebrew, nvm,
- * and the npm global prefix — so neither `npm` nor anything `npm i -g`
- * installs is reachable. We fix that here so child_process and node-pty
- * inherit a useful PATH.
+ * Augment process.env.PATH with common locations where Node toolchains live.
+ *
+ * macOS: GUI apps launched from Finder inherit a minimal PATH that misses
+ * Homebrew, nvm, and the npm global prefix.
+ * Windows: The Electron process may not inherit the full user PATH if started
+ * from an icon shortcut, and npm/node global paths need explicit addition.
+ *
+ * We fix this so child_process and node-pty inherit a useful PATH.
  */
+const PATH_SEP = process.platform === 'win32' ? ';' : ':';
+
 function augmentPath(): void {
   const home = homedir();
-  const extras: string[] = [
-    '/opt/homebrew/bin',
-    '/opt/homebrew/sbin',
-    '/usr/local/bin',
-    '/usr/local/sbin',
-    join(home, '.npm-global/bin'),
-    join(home, '.local/bin'),
-    join(home, '.bun/bin'),
-    join(home, '.cargo/bin'),
-  ];
-  // nvm: pick the highest-numbered installed node
-  try {
-    const nvmDir = join(home, '.nvm/versions/node');
-    if (existsSync(nvmDir)) {
-      const versions = readdirSync(nvmDir).sort().reverse();
-      if (versions[0]) extras.unshift(join(nvmDir, versions[0], 'bin'));
-    }
-  } catch {
-    // ignore
+  const extras: string[] = [];
+
+  if (process.platform === 'win32') {
+    // Windows: add common node/npm/scoop/fnm global locations
+    const appData = process.env.APPDATA ?? join(home, 'AppData', 'Roaming');
+    const localAppData = process.env.LOCALAPPDATA ?? join(home, 'AppData', 'Local');
+    extras.push(
+      join(appData, 'npm'),                          // npm global bin
+      join(home, 'scoop', 'shims'),                  // Scoop
+      join(localAppData, 'Microsoft', 'WinGet', 'Packages'),
+      join(home, '.cargo', 'bin'),                   // Rust/cargo
+      join(home, '.bun', 'bin'),                     // Bun
+      join(localAppData, 'fnm_multishells'),          // fnm (Node version manager)
+      'C:\\Program Files\\nodejs',                   // standard Node.js install
+      'C:\\Program Files (x86)\\nodejs',
+    );
+    // fnm: pick the active node version
+    try {
+      const fnmDir = join(localAppData, 'fnm', 'node-versions');
+      if (existsSync(fnmDir)) {
+        const versions = readdirSync(fnmDir).sort().reverse();
+        if (versions[0]) extras.unshift(join(fnmDir, versions[0], 'installation'));
+      }
+    } catch { /* ignore */ }
+  } else {
+    // macOS / Linux
+    extras.push(
+      '/opt/homebrew/bin',
+      '/opt/homebrew/sbin',
+      '/usr/local/bin',
+      '/usr/local/sbin',
+      join(home, '.npm-global', 'bin'),
+      join(home, '.local', 'bin'),
+      join(home, '.bun', 'bin'),
+      join(home, '.cargo', 'bin'),
+    );
+    // nvm: pick the highest-numbered installed node
+    try {
+      const nvmDir = join(home, '.nvm', 'versions', 'node');
+      if (existsSync(nvmDir)) {
+        const versions = readdirSync(nvmDir).sort().reverse();
+        if (versions[0]) extras.unshift(join(nvmDir, versions[0], 'bin'));
+      }
+    } catch { /* ignore */ }
   }
-  // npm global prefix (whichever npm we can find first)
-  for (const npmBin of [
-    '/opt/homebrew/bin/npm',
-    '/usr/local/bin/npm',
-    extras.find((p) => existsSync(join(p, 'npm')))
-      ? join(extras.find((p) => existsSync(join(p, 'npm')))!, 'npm')
-      : '',
-  ]) {
+
+  // npm global prefix detection (cross-platform)
+  const npmCandidates = process.platform === 'win32'
+    ? [join('C:\\Program Files\\nodejs', 'npm.cmd'), join(process.env.APPDATA ?? '', 'npm', 'npm.cmd')]
+    : ['/opt/homebrew/bin/npm', '/usr/local/bin/npm'];
+  for (const npmBin of npmCandidates) {
     if (npmBin && existsSync(npmBin)) {
       try {
         const prefix = execFileSync(npmBin, ['config', 'get', 'prefix'], {
           encoding: 'utf8',
           timeout: 3_000,
         }).trim();
-        if (prefix) extras.push(join(prefix, 'bin'));
-      } catch {
-        // ignore
-      }
+        if (prefix) {
+          extras.push(process.platform === 'win32' ? prefix : join(prefix, 'bin'));
+        }
+      } catch { /* ignore */ }
       break;
     }
   }
 
   const current = process.env.PATH ?? '';
-  const seen = new Set(current.split(':').filter(Boolean));
+  const seen = new Set(current.split(PATH_SEP).filter(Boolean));
   for (const e of extras) if (existsSync(e)) seen.add(e);
-  process.env.PATH = Array.from(seen).join(':');
+  process.env.PATH = Array.from(seen).join(PATH_SEP);
 }
 
 const TDAY_BIN = join(homedir(), '.tday', 'bin');
@@ -111,38 +140,54 @@ const TDAY_BIN = join(homedir(), '.tday', 'bin');
  * without fd; the user can still install fd manually.
  */
 async function ensureFd(env: Record<string, string | undefined>): Promise<void> {
+  // The fd binary name: `fd` on Unix, `fd.exe` on Windows.
+  const fdBin = process.platform === 'win32' ? 'fd.exe' : 'fd';
   // Already on PATH? bail.
-  for (const dir of (env.PATH ?? '').split(':')) {
-    if (dir && existsSync(join(dir, 'fd'))) return;
+  for (const dir of (env.PATH ?? '').split(PATH_SEP)) {
+    if (dir && existsSync(join(dir, fdBin))) return;
   }
-  const target = join(TDAY_BIN, 'fd');
+  const target = join(TDAY_BIN, fdBin);
   if (existsSync(target)) {
-    env.PATH = `${TDAY_BIN}:${env.PATH ?? ''}`;
+    env.PATH = `${TDAY_BIN}${PATH_SEP}${env.PATH ?? ''}`;
     return;
   }
 
-  if (process.platform !== 'darwin') {
-    // Linux/win32 users almost always have fd via package manager — leave
-    // them to it rather than ship arbitrary binaries.
-    return;
-  }
-
-  const arch = osArch() === 'arm64' ? 'aarch64' : 'x86_64';
   const version = 'v10.2.0';
-  const archive = `fd-${version}-${arch}-apple-darwin.tar.gz`;
-  const url = `https://github.com/sharkdp/fd/releases/download/${version}/${archive}`;
-  const tgz = join(TDAY_BIN, archive);
+  let archive: string;
+  let url: string;
+
+  if (process.platform === 'darwin') {
+    const arch = osArch() === 'arm64' ? 'aarch64' : 'x86_64';
+    archive = `fd-${version}-${arch}-apple-darwin.tar.gz`;
+    url = `https://github.com/sharkdp/fd/releases/download/${version}/${archive}`;
+  } else if (process.platform === 'win32') {
+    archive = `fd-${version}-x86_64-pc-windows-msvc.zip`;
+    url = `https://github.com/sharkdp/fd/releases/download/${version}/${archive}`;
+  } else {
+    // Linux users almost always have fd via package manager — leave them to it.
+    return;
+  }
+
+  const archivePath = join(TDAY_BIN, archive);
 
   try {
     if (!existsSync(TDAY_BIN)) mkdirSync(TDAY_BIN, { recursive: true });
     console.log('[tday] downloading fd:', url);
-    await downloadFollowingRedirects(url, tgz);
-    // Extract just the fd binary (works without a `tar` flag dance).
-    execFileSync('tar', ['-xzf', tgz, '-C', TDAY_BIN, '--strip-components=1'], {
-      stdio: 'ignore',
-    });
-    chmodSync(target, 0o755);
-    env.PATH = `${TDAY_BIN}:${env.PATH ?? ''}`;
+    await downloadFollowingRedirects(url, archivePath);
+    if (process.platform === 'win32') {
+      // Windows: use Node's built-in unzip (available in Node 18+ via child_process + PowerShell)
+      execFileSync('powershell', [
+        '-NoProfile', '-NonInteractive', '-Command',
+        `Expand-Archive -Path "${archivePath}" -DestinationPath "${TDAY_BIN}" -Force`,
+      ], { stdio: 'ignore', timeout: 30_000 });
+    } else {
+      // macOS: tar extract
+      execFileSync('tar', ['-xzf', archivePath, '-C', TDAY_BIN, '--strip-components=1'], {
+        stdio: 'ignore',
+      });
+      chmodSync(target, 0o755);
+    }
+    env.PATH = `${TDAY_BIN}${PATH_SEP}${env.PATH ?? ''}`;
     console.log('[tday] fd installed at', target);
   } catch (err) {
     console.error('[tday] fd auto-install failed (non-fatal):', err);
@@ -254,7 +299,9 @@ const INSTALL_SPECS: Record<AgentId, AgentInstallSpec | undefined> = {
  */
 function detectGeneric(bin: string): { available: boolean; version?: string; error?: string } {
   try {
-    const path = execFileSync('which', [bin], { encoding: 'utf8' }).trim();
+    // `where` on Windows, `which` on POSIX
+    const whichCmd = process.platform === 'win32' ? 'where' : 'which';
+    const path = execFileSync(whichCmd, [bin], { encoding: 'utf8' }).split(/\r?\n/)[0].trim();
     if (!path) return { available: false };
     let version: string | undefined;
     try {
@@ -276,20 +323,26 @@ function resolveExecutable(
     return { requested: bin, resolved: existsSync(bin) ? bin : null };
   }
 
-  for (const dir of (env.PATH ?? '').split(':')) {
+  // On Windows executables may need .exe or .cmd suffix.
+  const suffixes = process.platform === 'win32' ? ['', '.exe', '.cmd', '.bat'] : [''];
+
+  for (const dir of (env.PATH ?? '').split(PATH_SEP)) {
     if (!dir) continue;
-    const candidate = join(dir, bin);
-    if (existsSync(candidate)) {
-      return { requested: bin, resolved: candidate };
+    for (const suffix of suffixes) {
+      const candidate = join(dir, bin + suffix);
+      if (existsSync(candidate)) {
+        return { requested: bin, resolved: candidate };
+      }
     }
   }
 
   try {
-    const resolved = execFileSync('which', [bin], {
+    const whichCmd = process.platform === 'win32' ? 'where' : 'which';
+    const resolved = execFileSync(whichCmd, [bin], {
       encoding: 'utf8',
       env,
       timeout: 2_000,
-    }).trim();
+    }).split(/\r?\n/)[0].trim();
     return { requested: bin, resolved: resolved || null };
   } catch {
     return { requested: bin, resolved: null };
@@ -739,7 +792,9 @@ function registerIpc(): void {
       // When a tab restarts (cwd commit) the old PTY is killed and a new one
       // is spawned under the same tabId; without this guard the stale onExit
       // would race in and delete the new PTY entry, silently breaking input.
-      if (ptys.get(req.tabId) === pty) ptys.delete(req.tabId);
+      if (ptys.get(req.tabId) === pty) {
+        ptys.delete(req.tabId);
+      }
     });
 
     return { pid: pty.pid };
@@ -788,9 +843,18 @@ function registerIpc(): void {
   ipcMain.handle(IPC.usageAppend, (_e, record: UsageRecord) => {
     appendUsage(record);
   });
-  ipcMain.handle(IPC.usageQuery, (_e, filter: UsageFilter = {}) =>
-    queryUsage(filter),
-  );
+  ipcMain.handle(IPC.usageQuery, (_e, filter: UsageFilter = {}) => {
+    // Trigger a background incremental refresh (non-blocking — returns before
+    // any file I/O starts). The next query will get fresher data.
+    triggerSessionCacheRefresh();
+
+    // Fast path: serve from the persistent on-disk cache (in-memory hot cache).
+    const sessionRecords = loadCachedSessionRecords(filter);
+    const jsonlRecords = loadUsageRecords(filter).filter(
+      (r) => !SESSION_FILE_AGENTS.has(r.agentId),
+    );
+    return computeUsageSummary([...jsonlRecords, ...sessionRecords]);
+  });
 
   // ── Power management ───────────────────────────────────────────────────────
   ipcMain.handle(IPC.powerBlockerStart, () => {
@@ -855,12 +919,18 @@ async function runNpmGlobal(
   };
 
   const npmBin = ((): string | null => {
-    const candidates = [
-      ...((process.env.PATH ?? '').split(':').map((p) => join(p, 'npm'))),
-      '/opt/homebrew/bin/npm',
-      '/usr/local/bin/npm',
-    ];
-    for (const c of candidates) if (c && existsSync(c)) return c;
+    // On Windows npm may be `npm.cmd` (a wrapper batch file).
+    const npmNames = process.platform === 'win32' ? ['npm.cmd', 'npm.exe', 'npm'] : ['npm'];
+    const extraCandidates = process.platform === 'win32'
+      ? []
+      : ['/opt/homebrew/bin/npm', '/usr/local/bin/npm'];
+    for (const npmName of npmNames) {
+      const fromPath = (process.env.PATH ?? '').split(PATH_SEP)
+        .map((p) => join(p, npmName))
+        .find((c) => c && existsSync(c));
+      if (fromPath) return fromPath;
+    }
+    for (const c of extraCandidates) if (c && existsSync(c)) return c;
     return null;
   })();
 
@@ -994,6 +1064,36 @@ function installAppMenu(): void {
 
 app.whenReady().then(() => {
   augmentPath();
+  // On Windows, verify that Node.js and npm are available on PATH.  If they
+  // are missing, agents cannot be installed and the app will silently fail.
+  // Show a friendly dialog instead of letting the user debug env issues.
+  if (process.platform === 'win32') {
+    const nodeOk = Boolean(
+      (process.env.PATH ?? '').split(PATH_SEP).find((d) => d && existsSync(join(d, 'node.exe'))),
+    );
+    if (!nodeOk) {
+      // Show after window is created so it has a parent.
+      app.once('browser-window-created', (_, win) => {
+        void dialog.showMessageBox(win, {
+          type: 'warning',
+          title: 'Node.js not found',
+          message: 'Tday requires Node.js to install and run AI coding agents.',
+          detail:
+            'Node.js was not found on your PATH.\n\n' +
+            '1. Download and install Node.js (LTS) from https://nodejs.org\n' +
+            '2. Restart Tday after installation.\n\n' +
+            'Without Node.js, agents like Codex, Claude Code and others cannot be installed.',
+          buttons: ['Open nodejs.org', 'Continue without Node.js'],
+          defaultId: 0,
+        }).then(({ response }) => {
+          if (response === 0) {
+            void shell.openExternal('https://nodejs.org/en/download');
+          }
+        });
+      });
+    }
+  }
+
   if (!existsSync(TDAY_DIR)) mkdirSync(TDAY_DIR, { recursive: true });
   const agentsPath = join(TDAY_DIR, 'agents.json');
   if (!existsSync(agentsPath)) {
@@ -1070,6 +1170,9 @@ app.whenReady().then(() => {
   installAppMenu();
 
   registerIpc();
+  // Warm the session usage cache in the background so the first usageQuery
+  // is served from cache rather than triggering a cold full scan.
+  triggerSessionCacheRefresh();
   createWindow();
 
   app.on('activate', () => {

@@ -15,7 +15,12 @@ import { CodexDeepSeekAnthropicAdapter } from './adapter.js';
 
 /** Create and return a LocalGatewayManager instance. */
 export function createLocalGatewayManager(): LocalGatewayManager {
-  const adapters: GatewayAdapter[] = [new CodexDeepSeekAnthropicAdapter()];
+  const adapters: GatewayAdapter[] = [
+    // Specific adapters first (most restrictive match wins).
+    new CodexDeepSeekAnthropicAdapter(),
+    // Local provider usage is now tracked via OTel (claude-code) or PTY output
+    // scraping (codex etc.) — no generic HTTP proxy needed.
+  ];
   return {
     async resolve(ctx) {
       for (const a of adapters) {

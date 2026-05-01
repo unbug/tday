@@ -191,6 +191,8 @@ export interface UsageRecord {
   inputTokens: number;
   outputTokens: number;
   cachedTokens: number;
+  /** Number of tool/function calls in this response (0 if not reported). */
+  toolCalls?: number;
 }
 
 export interface UsageFilter {
@@ -220,8 +222,10 @@ export interface DailyStat {
   date: string;
   inputTokens: number;
   outputTokens: number;
+  cachedTokens: number;
   requests: number;
   costUsd: number | null;
+  toolCalls: number;
 }
 
 export interface UsageSummary {
@@ -230,6 +234,14 @@ export interface UsageSummary {
   totalOutputTokens: number;
   totalCachedTokens: number;
   costUsd: number | null;
+  /** cachedTokens / (inputTokens + cachedTokens), 0 when no input. */
+  cacheHitRate: number;
+  /** Total tool/function call invocations across all records. */
+  totalToolCalls: number;
+  /** Successful requests per active day in the queried window. */
+  throughputReqPerDay: number;
+  /** (input + output) tokens per minute across the actual record span. */
+  throughputTokensPerMin: number;
   byModel: Record<string, ModelUsage>;
   byAgent: Record<string, AgentUsage>;
   daily: DailyStat[];

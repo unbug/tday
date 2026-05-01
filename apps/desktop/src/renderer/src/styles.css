@@ -7,6 +7,19 @@
   .input {
     @apply w-full rounded-md border border-zinc-800 bg-zinc-900/80 px-3 py-1.5 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-fuchsia-500/60 focus:ring-1 focus:ring-fuchsia-500/40;
   }
+
+  .input-date {
+    @apply input;
+    color-scheme: dark;
+  }
+  .input-date::-webkit-calendar-picker-indicator {
+    filter: invert(0.6) sepia(1) saturate(3) hue-rotate(255deg) brightness(0.9);
+    cursor: pointer;
+    opacity: 0.8;
+  }
+  .input-date::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+  }
 }
 
 /* --- themed scrollbars (everywhere) ----------------------------------- */

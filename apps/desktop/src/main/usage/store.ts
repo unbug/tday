@@ -60,11 +60,15 @@ export interface UsageFilter {
   providerId?: string;
 }
 
-/** Read all records and compute a UsageSummary for the given filter. */
-export function queryUsage(filter: UsageFilter = {}): UsageSummary {
+/**
+ * Pure aggregation: compute a UsageSummary from an already-loaded list of
+ * records. The pricing table is read fresh from disk each call.
+ */
+export function computeUsageSummary(records: UsageRecord[]): UsageSummary {
   const pricing = mergedPricing();
-  const records = loadRecords(filter);
 
+  let totalRequests = 0;
+  let totalToolCalls = 0;
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let totalCachedTokens = 0;
@@ -74,12 +78,17 @@ export function queryUsage(filter: UsageFilter = {}): UsageSummary {
   const dailyMap: Record<string, DailyStat> = {};
 
   for (const r of records) {
+    const date = new Date(r.ts).toISOString().slice(0, 10);
+
+    totalRequests++;
     const p = resolvePrice(r.model, pricing);
     const cost = calcCost(r.inputTokens, r.outputTokens, r.cachedTokens, p);
+    const tc = r.toolCalls ?? 0;
 
     totalInputTokens += r.inputTokens;
     totalOutputTokens += r.outputTokens;
     totalCachedTokens += r.cachedTokens;
+    totalToolCalls += tc;
     if (cost !== null && totalCostUsd !== null) {
       totalCostUsd += cost;
     } else if (cost === null) {
@@ -109,31 +118,46 @@ export function queryUsage(filter: UsageFilter = {}): UsageSummary {
     else am.costUsd = null;
 
     // Daily
-    const date = new Date(r.ts).toISOString().slice(0, 10);
-    if (!dailyMap[date]) dailyMap[date] = { date, inputTokens: 0, outputTokens: 0, requests: 0, costUsd: 0 };
+    if (!dailyMap[date]) dailyMap[date] = { date, inputTokens: 0, outputTokens: 0, cachedTokens: 0, requests: 0, costUsd: 0, toolCalls: 0 };
     const dm = dailyMap[date]!;
     dm.inputTokens += r.inputTokens;
     dm.outputTokens += r.outputTokens;
+    dm.cachedTokens += r.cachedTokens;
     dm.requests += 1;
+    dm.toolCalls += tc;
     if (cost !== null && dm.costUsd !== null) dm.costUsd += cost;
     else dm.costUsd = null;
   }
 
   const daily = Object.values(dailyMap).sort((a, b) => a.date.localeCompare(b.date));
+  const activeDays = Math.max(1, daily.length);
+  const promptTokens = totalInputTokens + totalCachedTokens;
+  const cacheHitRate = promptTokens > 0 ? totalCachedTokens / promptTokens : 0;
+
+  // Compute token throughput: total tokens / span of actual records in minutes.
+  const tsValues = records.map((r) => r.ts);
+  const spanMs = tsValues.length > 1 ? Math.max(...tsValues) - Math.min(...tsValues) : 0;
+  const spanMin = Math.max(1, spanMs / 60_000);
+  const throughputTokensPerMin = (totalInputTokens + totalOutputTokens) / spanMin;
 
   return {
-    totalRequests: records.length,
+    totalRequests,
     totalInputTokens,
     totalOutputTokens,
     totalCachedTokens,
     costUsd: totalCostUsd,
+    cacheHitRate,
+    totalToolCalls,
+    throughputReqPerDay: totalRequests / activeDays,
+    throughputTokensPerMin,
     byModel,
     byAgent,
     daily,
   };
 }
 
-function loadRecords(filter: UsageFilter): UsageRecord[] {
+/** Load records from usage.jsonl, applying the given filter. */
+export function loadUsageRecords(filter: UsageFilter = {}): UsageRecord[] {
   if (!existsSync(USAGE_FILE)) return [];
   const lines = readFileSync(USAGE_FILE, 'utf8').split('\n').filter(Boolean);
   const records: UsageRecord[] = [];
@@ -150,4 +174,9 @@ function loadRecords(filter: UsageFilter): UsageRecord[] {
     }
   }
   return records;
+}
+
+/** Read all records and compute a UsageSummary for the given filter. */
+export function queryUsage(filter: UsageFilter = {}): UsageSummary {
+  return computeUsageSummary(loadUsageRecords(filter));
 }
