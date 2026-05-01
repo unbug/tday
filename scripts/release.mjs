@@ -35,4 +35,11 @@ execSync('pnpm --filter @tday/desktop typecheck', { stdio: 'inherit', cwd: root 
 console.log(`[release] building Tday v${next}`);
 execSync('pnpm --filter @tday/desktop build', { stdio: 'inherit', cwd: root });
 execSync('pnpm --filter @tday/desktop package:mac', { stdio: 'inherit', cwd: root });
-console.log(`[release] done — see apps/desktop/release/${next}/`);
+
+// Commit bumped versions and create a git tag so CI can associate the build
+console.log(`[release] tagging v${next}`);
+execSync('git add ' + targets.map(t => JSON.stringify(t)).join(' '), { stdio: 'inherit', cwd: root });
+execSync(`git commit -m "chore: release v${next}"`, { stdio: 'inherit', cwd: root });
+execSync(`git tag v${next}`, { stdio: 'inherit', cwd: root });
+console.log(`[release] done — run: git push origin main --tags`);
+console.log(`[release] artifacts: apps/desktop/release/${next}/`);

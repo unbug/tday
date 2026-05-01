@@ -8,6 +8,12 @@ name: release
 #                                     `publish` is checked)
 
 on:
+  # Pushing a vX.Y.Z tag (created by scripts/release.mjs) kicks off a full
+  # build + publishes a draft GitHub Release automatically.
+  push:
+    tags:
+      - 'v*'
+  # Manual fallback: lets you build from any branch/commit without a tag.
   workflow_dispatch:
     inputs:
       publish:
@@ -98,7 +104,8 @@ jobs:
   publish:
     name: publish github release
     needs: build
-    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    # Run on tag pushes (automatic), or when manually triggered with publish=true.
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish)
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/download-artifact@v4
@@ -111,8 +118,11 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
+          # On a tag push, github.ref_name is the tag (e.g. v0.1.24).
+          # On a manual dispatch there is no tag, so fall back to a placeholder.
           tag_name: "${{ github.ref_type == 'tag' && github.ref_name || format('v0.0.0-manual-{0}', github.run_number) }}"
-          name: "${{ github.ref_type == 'tag' && github.ref_name || format('Manual build #{0}', github.run_number) }}"
+          name: "${{ github.ref_type == 'tag' && github.ref_name || format('Manual build \#{0}', github.run_number) }}"
+          # Tag-push builds are published immediately; manual ones stay as drafts.
           draft: ${{ github.event_name == 'workflow_dispatch' }}
           generate_release_notes: true
           files: dist/*
