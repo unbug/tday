@@ -794,8 +794,8 @@ function registerIpc(): void {
 
   // ── Power management ───────────────────────────────────────────────────────
   ipcMain.handle(IPC.powerBlockerStart, () => {
-    // Prevent system sleep but allow the display to sleep.
-    const id = powerSaveBlocker.start('prevent-system-sleep');
+    // prevent-app-suspension: keeps system awake but allows display to sleep.
+    const id = powerSaveBlocker.start('prevent-app-suspension');
     // On macOS immediately dim the display via pmset.
     if (process.platform === 'darwin') {
       execAsync('pmset displaysleepnow', () => { /* ignore errors */ });
