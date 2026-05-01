@@ -24,7 +24,6 @@ export function Settings({ open, onClose, onSaved }: Props) {
   const [cfg, setCfg] = useState<ProvidersConfig | null>(null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [activeId, setActiveId] = useState<string>('');
-  const [saving, setSaving] = useState(false);
   const [savedTick, setSavedTick] = useState(0);
   const [installingId, setInstallingId] = useState<string | null>(null);
   const [installPct, setInstallPct] = useState(0);
@@ -47,6 +46,11 @@ export function Settings({ open, onClose, onSaved }: Props) {
     setActiveId((cur) => cur || c.default || c.profiles[0]?.id || '');
   };
 
+  // Preload eagerly on mount so data is ready before the user opens settings.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { void refresh(); }, []);
+
+  // Re-fetch when opened in case data changed externally.
   useEffect(() => {
     if (!open) return;
     void refresh();
@@ -133,19 +137,15 @@ export function Settings({ open, onClose, onSaved }: Props) {
     });
   };
 
-  const saveProviders = async () => {
+  // Optimistic: update UI immediately, persist in background.
+  const saveProviders = () => {
     if (!cfg) return;
-    setSaving(true);
-    try {
-      await window.tday.saveProviders(cfg);
-      setSavedTick((t) => t + 1);
-      onSaved?.();
-    } finally {
-      setSaving(false);
-    }
+    setSavedTick((t) => t + 1);
+    void window.tday.saveProviders(cfg);
+    onSaved?.();
   };
 
-  const persistAgents = async (next: AgentInfo[]) => {
+  const persistAgents = (next: AgentInfo[]) => {
     const defaultAgentId = (next.find((a) => a.isDefault)?.id ?? 'pi') as AgentId;
     const cfgOut: AgentsConfig = {
       defaultAgentId,
@@ -156,24 +156,24 @@ export function Settings({ open, onClose, onSaved }: Props) {
         ]),
       ) as AgentsConfig['agents'],
     };
-    await window.tday.saveAgents(cfgOut);
+    void window.tday.saveAgents(cfgOut);
     onSaved?.();
   };
 
-  const setAsDefault = async (agentId: AgentId) => {
+  const setAsDefault = (agentId: AgentId) => {
     const next = agents.map((a) => ({ ...a, isDefault: a.id === agentId }));
     setAgents(next);
-    await persistAgents(next);
+    persistAgents(next);
   };
 
-  const bindProvider = async (agentId: string, providerId: string) => {
+  const bindProvider = (agentId: string, providerId: string) => {
     const next = shared
       ? agents.map((a) => ({ ...a, providerId: providerId || undefined }))
       : agents.map((a) =>
           a.id === agentId ? { ...a, providerId: providerId || undefined } : a,
         );
     setAgents(next);
-    await persistAgents(next);
+    persistAgents(next);
   };
 
   const setAgentModel = (agentId: string, model: string) => {
@@ -184,11 +184,11 @@ export function Settings({ open, onClose, onSaved }: Props) {
     );
   };
 
-  const flushAgentModel = async () => {
-    await persistAgents(agents);
+  const flushAgentModel = () => {
+    persistAgents(agents);
   };
 
-  const toggleShared = async (next: boolean) => {
+  const toggleShared = (next: boolean) => {
     setShared(next);
     try {
       localStorage.setItem(SHARED_KEY, next ? '1' : '0');
@@ -206,7 +206,7 @@ export function Settings({ open, onClose, onSaved }: Props) {
           model: first.model,
         }));
         setAgents(synced);
-        await persistAgents(synced);
+        persistAgents(synced);
       }
     }
   };
@@ -413,10 +413,9 @@ export function Settings({ open, onClose, onSaved }: Props) {
                       </label>
                       <button
                         onClick={saveProviders}
-                        disabled={saving}
-                        className="rounded-md bg-fuchsia-500/90 px-4 py-1.5 text-xs font-medium text-white hover:bg-fuchsia-500 disabled:opacity-50"
+                        className="rounded-md bg-fuchsia-500/90 px-4 py-1.5 text-xs font-medium text-white hover:bg-fuchsia-500"
                       >
-                        {saving ? 'Saving…' : 'Save'}
+                        Save
                       </button>
                     </div>
                     {savedTick > 0 ? (
@@ -441,7 +440,7 @@ export function Settings({ open, onClose, onSaved }: Props) {
                 <input
                   type="checkbox"
                   checked={shared}
-                  onChange={(e) => void toggleShared(e.target.checked)}
+                  onChange={(e) => toggleShared(e.target.checked)}
                 />
                 <span className="flex-1">
                   Use one provider/model for <strong>all</strong> agents
@@ -539,7 +538,7 @@ export function Settings({ open, onClose, onSaved }: Props) {
                             <select
                               className="input pl-8"
                               value={a.providerId ?? ''}
-                              onChange={(e) => bindProvider(a.id, e.target.value)}
+                              onChange={(e) => void bindProvider(a.id, e.target.value)}
                             >
                               <option value="">— none —</option>
                               {cfg?.profiles.map((p) => (
