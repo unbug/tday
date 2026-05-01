@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AgentId,
   AgentInfo,
@@ -7,7 +7,6 @@ import type {
   ProviderProfile,
   ProvidersConfig,
   ProviderKind,
-  DiscoveredService,
   UsageSummary,
   UsageFilter,
 } from '@tday/shared';
@@ -30,11 +29,25 @@ export function Settings({ open, onClose, onSaved }: Props) {
   const [savedTick, setSavedTick] = useState(0);
   const [installingId, setInstallingId] = useState<string | null>(null);
   const [installPct, setInstallPct] = useState(0);
-  const [discovering, setDiscovering] = useState(false);
-  const [discovered, setDiscovered] = useState<DiscoveredService[]>([]);
+  // Per-profile probe results: profileId -> { models, latencyMs, ok, probing }
+  const [probeState, setProbeState] = useState<Record<string, { models: string[]; latencyMs: number; ok: boolean; probing: boolean; error?: string }>>({});
   const [usageData, setUsageData] = useState<UsageSummary | null>(null);
   const [usageRange, setUsageRange] = useState<7 | 30 | 90>(30);
   const [usageAgentId, setUsageAgentId] = useState('');
+  // Ref for debounced probe timer — must be declared before any early return
+  const probeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleProbe = useCallback((id: string, url: string) => {
+    if (probeTimer.current) clearTimeout(probeTimer.current);
+    if (!url.trim()) return;
+    probeTimer.current = setTimeout(() => {
+      setProbeState((s) => ({ ...s, [id]: { models: [], latencyMs: 0, ok: false, probing: true } }));
+      window.tday.probeUrl(url.trim()).then((result) => {
+        setProbeState((s) => ({ ...s, [id]: { ...result, probing: false } }));
+      }).catch(() => {
+        setProbeState((s) => ({ ...s, [id]: { models: [], latencyMs: 0, ok: false, probing: false, error: 'Failed' } }));
+      });
+    }, 800);
+  }, []);
   const SHARED_KEY = 'tday:sharedAgentConfig';
   const [shared, setShared] = useState<boolean>(() => {
     try {
@@ -52,6 +65,17 @@ export function Settings({ open, onClose, onSaved }: Props) {
     setCfg(c);
     setAgents(a);
     setActiveId((cur) => cur || c.default || c.profiles[0]?.id || '');
+  };
+
+  const loadUsage = async (range: number, agentId: string) => {
+    const filter: UsageFilter = { fromTs: Date.now() - range * 24 * 60 * 60 * 1000 };
+    if (agentId) filter.agentId = agentId;
+    try {
+      const summary = await window.tday.queryUsage(filter);
+      setUsageData(summary);
+    } catch {
+      // ignore
+    }
   };
 
   // Preload eagerly on mount so data is ready before the user opens settings.
@@ -141,13 +165,14 @@ export function Settings({ open, onClose, onSaved }: Props) {
   const switchStyle = (style: ApiStyle) => {
     if (!profile) return;
     const preset = presetForKind(profile.kind);
-    const url = preset.baseUrls[style];
-    // For providers that don't ship a canonical URL for this dialect, leave
-    // the field empty so the user can fill in their own — we still allow the
-    // toggle (req #3: every provider exposes both base_url options).
+    const newPresetUrl = preset.baseUrls[style];
+    // Only reset baseUrl if the current value still matches one of the preset URLs
+    // (i.e. the user hasn't set a custom address like a LAN IP).
+    const allPresetUrls = Object.values(preset.baseUrls).map((u) => u?.replace(/\/$/, '') ?? '');
+    const currentIsPreset = !profile.baseUrl || allPresetUrls.includes(profile.baseUrl.replace(/\/$/, ''));
     updateProfile({
       apiStyle: style,
-      baseUrl: url ?? '',
+      baseUrl: currentIsPreset ? (newPresetUrl ?? '') : profile.baseUrl ?? '',
     });
   };
 
@@ -226,47 +251,30 @@ export function Settings({ open, onClose, onSaved }: Props) {
   };
 
   const runDiscovery = async () => {
-    setDiscovering(true);
+    if (!profile) return;
+    const url = profile.baseUrl?.trim();
+    if (!url) return;
+    // Persist the current URL before probing so closing settings won't revert it.
+    saveProviders();
+    setProbeState((s) => ({ ...s, [profile.id]: { models: [], latencyMs: 0, ok: false, probing: true } }));
     try {
-      const results = await window.tday.discoverServices({});
-      setDiscovered(results);
+      const result = await window.tday.probeUrl(url);
+      setProbeState((s) => ({ ...s, [profile.id]: { ...result, probing: false } }));
+      if (result.ok && result.models.length > 0) {
+        // Persist discovered models so chips survive settings close/reopen.
+        const patch: Partial<import('@tday/shared').ProviderProfile> = { discoveredModels: result.models };
+        // Auto-fill model field if currently empty.
+        if (!profile.model) patch.model = result.models[0];
+        updateProfile(patch);
+        // Save immediately so discovered models aren't lost.
+        setTimeout(() => saveProviders(), 0);
+      }
     } catch {
-      // ignore
-    } finally {
-      setDiscovering(false);
+      setProbeState((s) => ({ ...s, [profile.id]: { models: [], latencyMs: 0, ok: false, probing: false, error: 'Failed' } }));
     }
   };
 
-  const addDiscoveredService = (svc: DiscoveredService) => {
-    if (!cfg) return;
-    const existing = cfg.profiles.find((p) => p.baseUrl === svc.baseUrl);
-    if (existing) { setActiveId(existing.id); return; }
-    const id = svc.kind + '-' + Date.now().toString(36);
-    const next: ProviderProfile = {
-      id,
-      label: svc.label,
-      kind: svc.kind,
-      apiStyle: 'openai',
-      baseUrl: svc.baseUrl,
-      model: svc.models[0] ?? '',
-      apiKey: '',
-    };
-    setCfg({ ...cfg, default: cfg.default ?? id, profiles: [...cfg.profiles, next] });
-    setActiveId(id);
-    setSection('providers');
-  };
-
-  const loadUsage = async (range: number, agentId: string) => {
-    const filter: UsageFilter = { fromTs: Date.now() - range * 24 * 60 * 60 * 1000 };
-    if (agentId) filter.agentId = agentId;
-    try {
-      const summary = await window.tday.queryUsage(filter);
-      setUsageData(summary);
-    } catch {
-      // ignore
-    }
-  };
-
+  // Auto-probe when base URL changes (debounced)
   const installAgent = async (agentId: string, action: 'install' | 'update' | 'uninstall') => {
     setInstallingId(agentId);
     setInstallPct(0);
@@ -367,44 +375,6 @@ export function Settings({ open, onClose, onSaved }: Props) {
                     ))}
                   </div>
                 </details>
-                {/* Auto-detect local AI services */}
-                <div className="mt-3 border-t border-zinc-800/60 pt-2">
-                  <button
-                    onClick={() => void runDiscovery()}
-                    disabled={discovering}
-                    className="flex w-full items-center gap-1.5 rounded-md px-2 py-2 text-left text-[11px] text-sky-400 hover:bg-zinc-900 disabled:opacity-60"
-                  >
-                    <span>{discovering ? '⟳' : '⊕'}</span>
-                    {discovering ? 'Scanning…' : 'Auto-detect local'}
-                  </button>
-                  {discovered.length > 0 ? (
-                    <div className="mt-1 space-y-1">
-                      {discovered.map((svc) => (
-                        <div
-                          key={svc.baseUrl}
-                          className="rounded-md border border-zinc-800/60 bg-zinc-900/60 p-2"
-                        >
-                          <div className="flex items-center justify-between gap-1">
-                            <div className="min-w-0">
-                              <div className="truncate text-[11px] font-medium text-zinc-200">
-                                {svc.label}
-                              </div>
-                              <div className="truncate text-[10px] text-zinc-500">
-                                {svc.models.length} model{svc.models.length !== 1 ? 's' : ''} · {svc.latencyMs}ms
-                              </div>
-                            </div>
-                            <button
-                              onClick={() => addDiscoveredService(svc)}
-                              className="shrink-0 rounded bg-sky-500/20 px-1.5 py-0.5 text-[10px] text-sky-300 hover:bg-sky-500/40"
-                            >
-                              Add
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
               </div>
               <div className="scroll-themed flex-1 overflow-y-auto p-5 text-xs">
                 {profile && profilePreset ? (
@@ -464,31 +434,97 @@ export function Settings({ open, onClose, onSaved }: Props) {
                       </div>
                     </Field>
                     <Field label="Base URL">
-                      <input
-                        className="input"
-                        placeholder={
-                          profilePreset.baseUrls[profile.apiStyle ?? 'openai'] ??
-                          'https://api.example.com/v1'
-                        }
-                        value={profile.baseUrl ?? ''}
-                        onChange={(e) => updateProfile({ baseUrl: e.target.value })}
-                      />
+                      <div className="flex gap-1.5">
+                        <input
+                          className="input flex-1"
+                          placeholder={
+                            profilePreset.baseUrls[profile.apiStyle ?? 'openai'] ??
+                            'https://api.example.com/v1'
+                          }
+                          value={profile.baseUrl ?? ''}
+                          onChange={(e) => {
+                            updateProfile({ baseUrl: e.target.value });
+                            scheduleProbe(profile.id, e.target.value);
+                          }}
+                          onBlur={() => saveProviders()}
+                        />
+                        <button
+                          onClick={() => void runDiscovery()}
+                          disabled={probeState[profile.id]?.probing}
+                          title="Scan this URL for available models"
+                          className="shrink-0 rounded-md border border-zinc-700 px-2.5 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+                        >
+                          {probeState[profile.id]?.probing ? '…' : 'Scan'}
+                        </button>
+                      </div>
+                      {/* Probe status badge */}
+                      {probeState[profile.id] && !probeState[profile.id].probing ? (
+                        <div className="mt-1 flex items-center gap-1.5 text-[10px]">
+                          {probeState[profile.id].ok ? (
+                            <>
+                              <span className="text-emerald-400">● reachable</span>
+                              <span className="text-zinc-500">·</span>
+                              <span className="text-zinc-400">{probeState[profile.id].latencyMs}ms</span>
+                              {probeState[profile.id].models.length > 0 ? (
+                                <>
+                                  <span className="text-zinc-500">·</span>
+                                  <span className="text-zinc-400">{probeState[profile.id].models.length} model{probeState[profile.id].models.length !== 1 ? 's' : ''} found</span>
+                                </>
+                              ) : null}
+                            </>
+                          ) : (
+                            <span className="text-rose-400">
+                              ● {probeState[profile.id].error ?? 'Not reachable'}
+                            </span>
+                          )}
+                        </div>
+                      ) : null}
                     </Field>
                     <Field label="Model">
-                      <input
-                        className="input"
-                        list={`models-${profile.id}`}
-                        placeholder={profilePreset.models[0] ?? 'model-id'}
-                        value={profile.model ?? ''}
-                        onChange={(e) => updateProfile({ model: e.target.value })}
-                      />
-                      {profilePreset.models.length > 0 ? (
-                        <datalist id={`models-${profile.id}`}>
-                          {profilePreset.models.map((m) => (
-                            <option key={m} value={m} />
-                          ))}
-                        </datalist>
-                      ) : null}
+                      {(() => {
+                        const probed = probeState[profile.id];
+                        // Merge: live probe result > persisted discovered models > preset static list
+                        const probedModels = probed?.models ?? [];
+                        const persistedModels = profile.discoveredModels ?? [];
+                        const baseModels = probedModels.length > 0 ? probedModels : persistedModels;
+                        const allModels = [
+                          ...baseModels,
+                          ...profilePreset.models.filter((m) => !baseModels.includes(m)),
+                        ];
+                        return (
+                          <>
+                            <input
+                              className="input"
+                              list={`models-${profile.id}`}
+                              placeholder={allModels[0] ?? 'model-id'}
+                              value={profile.model ?? ''}
+                              onChange={(e) => updateProfile({ model: e.target.value })}
+                            />
+                            <datalist id={`models-${profile.id}`}>
+                              {allModels.map((m) => (
+                                <option key={m} value={m} />
+                              ))}
+                            </datalist>
+                            {baseModels.length > 0 ? (
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {probedModels.map((m) => (
+                                  <button
+                                    key={m}
+                                    onClick={() => updateProfile({ model: m })}
+                                    className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${
+                                      profile.model === m
+                                        ? 'bg-fuchsia-500/25 text-fuchsia-200'
+                                        : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
+                                    }`}
+                                  >
+                                    {m}
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
+                          </>
+                        );
+                      })()}
                     </Field>
                     <Field label="API Key">
                       <input
@@ -729,10 +765,11 @@ export function Settings({ open, onClose, onSaved }: Props) {
               {usageData ? (
                 <>
                   {/* Summary cards */}
-                  <div className="mb-4 grid grid-cols-4 gap-2">
+                  <div className="mb-4 grid grid-cols-3 gap-2">
+                    <StatCard label="Total tokens" value={fmtNum(usageData.totalInputTokens + usageData.totalOutputTokens)}
+                      sub={`${fmtNum(usageData.totalInputTokens)} in · ${fmtNum(usageData.totalOutputTokens)} out`}
+                    />
                     <StatCard label="Requests" value={String(usageData.totalRequests)} />
-                    <StatCard label="Input tokens" value={fmtNum(usageData.totalInputTokens)} />
-                    <StatCard label="Output tokens" value={fmtNum(usageData.totalOutputTokens)} />
                     <StatCard
                       label="Est. cost"
                       value={
@@ -917,11 +954,12 @@ function fmtNum(n: number): string {
   return String(n);
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="rounded-md border border-zinc-800/60 bg-zinc-900/60 p-3 text-center">
       <div className="text-[10px] uppercase tracking-wider text-zinc-500">{label}</div>
       <div className="mt-1 text-lg font-semibold text-zinc-100">{value}</div>
+      {sub ? <div className="mt-0.5 text-[10px] text-zinc-500">{sub}</div> : null}
     </div>
   );
 }

@@ -15,9 +15,13 @@
  * real API key is needed.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { CodexDeepSeekAnthropicAdapter } from '../adapter.js';
+
+// Prevent integration tests from writing to the real ~/.tday/usage.jsonl
+vi.mock('../../usage/store.js', () => ({ appendUsage: vi.fn() }));
+
 import type { GatewayAdapterContext } from '../types.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

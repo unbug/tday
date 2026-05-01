@@ -173,3 +173,53 @@ export async function probeService(
     latencyMs: health.latencyMs,
   };
 }
+
+/**
+ * Probe an arbitrary base URL (e.g. `http://localhost:1234/v1`) for models.
+ *
+ * Tries three endpoints in order:
+ *   1. `{baseUrl}/models`        (OpenAI-compat: LM Studio, vLLM, llama.cpp, Jan, etc.)
+ *   2. `{baseUrl}/v1/models`     (if baseUrl does NOT already end with /v1)
+ *   3. Ollama `/api/tags`        (if port matches 11434 OR /api/tags path returns 200)
+ */
+export async function probeBaseUrl(
+  rawUrl: string,
+  timeoutMs = 3_000,
+): Promise<{ ok: boolean; models: string[]; latencyMs: number; error?: string }> {
+  let u: URL;
+  try {
+    u = new URL(rawUrl.trim());
+  } catch {
+    return { ok: false, models: [], latencyMs: 0, error: 'Invalid URL' };
+  }
+
+  const base = rawUrl.trim().replace(/\/$/, '');
+
+  // Candidates to try
+  const candidates: string[] = [];
+  candidates.push(base + '/models');
+  if (!/\/v\d+$/.test(base)) candidates.push(base + '/v1/models');
+  // Ollama: strip possible /v1 suffix and probe /api/tags
+  const ollamaBase = base.replace(/\/v\d+$/, '');
+  candidates.push(ollamaBase + '/api/tags');
+
+  for (const url of candidates) {
+    const result = await httpGet(url, timeoutMs);
+    if (result.ok) {
+      const models = parseModelList(result.body);
+      if (models.length > 0) {
+        return { ok: true, models, latencyMs: result.latencyMs };
+      }
+      // ok response but no models parsed — still mark as reachable
+      return { ok: true, models: [], latencyMs: result.latencyMs };
+    }
+  }
+
+  // Nothing responded — try a plain GET on the base URL itself to check connectivity
+  const ping = await httpGet(u.origin, timeoutMs);
+  if (ping.ok) {
+    return { ok: true, models: [], latencyMs: ping.latencyMs, error: 'No model list endpoint found' };
+  }
+
+  return { ok: false, models: [], latencyMs: 0, error: 'Not reachable' };
+}

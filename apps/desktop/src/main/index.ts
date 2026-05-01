@@ -31,6 +31,7 @@ import {
 } from '@tday/shared';
 import { createLocalGatewayManager } from './gateway';
 import { discoverLocalServices } from './discovery/index.js';
+import { probeBaseUrl } from './discovery/probe.js';
 import { appendUsage, queryUsage } from './usage/store.js';
 
 const TDAY_DIR = join(homedir(), '.tday');
@@ -780,6 +781,8 @@ function registerIpc(): void {
   ipcMain.handle(IPC.discoverServices, (_e, req: { extraHosts?: string[]; scanSubnet?: boolean } = {}) =>
     discoverLocalServices({ extraHosts: req.extraHosts, scanSubnet: req.scanSubnet }),
   );
+
+  ipcMain.handle(IPC.probeUrl, (_e, url: string) => probeBaseUrl(url));
 
   // ── Token usage statistics ─────────────────────────────────────────────────
   ipcMain.handle(IPC.usageAppend, (_e, record: UsageRecord) => {

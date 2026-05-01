@@ -10,6 +10,7 @@ import {
   type PtyExitEvent,
   type DiscoveredService,
   type DiscoverServicesRequest,
+  type ProbeUrlResult,
   type UsageRecord,
   type UsageFilter,
   type UsageSummary,
@@ -59,6 +60,8 @@ const api = {
   // ── Local service discovery ────────────────────────────────────────────────
   discoverServices: (req: DiscoverServicesRequest = {}) =>
     ipcRenderer.invoke(IPC.discoverServices, req) as Promise<DiscoveredService[]>,
+  probeUrl: (url: string) =>
+    ipcRenderer.invoke(IPC.probeUrl, url) as Promise<ProbeUrlResult>,
   // ── Token usage statistics ─────────────────────────────────────────────────
   appendUsage: (record: UsageRecord) =>
     ipcRenderer.invoke(IPC.usageAppend, record) as Promise<void>,

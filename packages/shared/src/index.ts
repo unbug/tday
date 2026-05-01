@@ -74,6 +74,8 @@ export interface ProviderProfile {
   apiKey?: string;
   /** Extra env vars applied verbatim. */
   env?: Record<string, string>;
+  /** Model IDs discovered by the last successful Scan, persisted across sessions. */
+  discoveredModels?: string[];
 }
 
 /** What the renderer asks the main process to spawn. */
@@ -144,6 +146,7 @@ export const IPC = {
   pickDir: 'app:pick-dir', // renderer -> main: open folder picker
   // Local service discovery
   discoverServices: 'discovery:scan',
+  probeUrl: 'discovery:probe-url',
   // Token usage statistics
   usageAppend: 'usage:append',
   usageQuery: 'usage:query',
@@ -165,6 +168,14 @@ export interface DiscoverServicesRequest {
   extraHosts?: string[];
   /** Whether to scan the local /24 subnet. Default false. */
   scanSubnet?: boolean;
+}
+
+/** Result of probing a single base URL for available models. */
+export interface ProbeUrlResult {
+  ok: boolean;
+  models: string[];
+  latencyMs: number;
+  error?: string;
 }
 
 // ─── Usage types ──────────────────────────────────────────────────────────────

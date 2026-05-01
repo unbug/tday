@@ -30,6 +30,25 @@
 
 
 ---
+## Installation
+
+Download the latest `.dmg` (macOS) or `.exe` (Windows) from [Releases](https://github.com/unbug/tday/releases).
+
+### macOS — "unverified developer" warning
+
+The distributed build is **not code-signed** with an Apple Developer certificate. macOS will block the app on first launch. To bypass:
+
+```bash
+xattr -rd com.apple.quarantine /Applications/Tday.app
+```
+
+Or: right-click the `.app` → **Open** → click **Open** in the dialog.
+
+Or:
+
+<img width="968" height="716" alt="Image" src="https://github.com/user-attachments/assets/116d2b64-23e6-4a35-8409-1310fe8ecfcd" />
+
+---
 
 ## 1. Vision
 
@@ -155,14 +174,19 @@ A **Tab** owns one **Session** = one PTY process bound to one agent adapter, one
 |---|---|---|
 | ~~**v0.1.0**~~ ✅ | _Walk_ — Pi end-to-end | Single-tab MVP. Spawn the `pi` agent in a PTY tab. Static provider config from a JSON file. Border-beam shell. |
 | ~~**v0.2.0**~~ ✅ | Multi-agent, multi-tab | Adapters for Claude Code, Codex, Copilot CLI, OpenCode. Tab manager (open/close/reorder/duplicate). Per-tab cwd picker. |
-| ~~**v0.3.0**~~ ✅ | Providers UI + Gateway | Settings panel for 28 cloud/local providers. DeepSeek Anthropic gateway proxy (OpenAI Responses API → Anthropic). Per-agent model override. |
-| **v0.4.0** | Local-inference autodetect | Rust scanner polls `localhost:11434` (Ollama), `:1234` (LM Studio), `:8080` (llama.cpp), `:8000` (vLLM). Auto-add discovered endpoints with their model lists. mDNS for LAN. |
-| **v0.5.0** | Token usage analytics | Per-tab, per-agent, per-provider, per-model accounting. Cost estimation. Charts. Export CSV/JSON. |
-| **v0.6.0** | Unified long-term memory | SQLite + `sqlite-vec`. Cross-agent recall via MCP-server bridge that every adapter can mount. Per-project scoping. |
-| **v0.7.0** | Performance & polish | WebGL terminal renderer, lazy tab hydration, snapshot-based session restore, profiler, memory budgets. |
-| **v0.8.0** | Plugins & extensibility | Adapter SDK, third-party adapters loadable from a manifest, custom themes. |
-| **v0.9.0** | Sync & teams | Optional E2EE sync of memory + usage across devices. Team dashboards. |
-| **v1.0.0** | GA | Auto-update, signed builds for macOS/Windows/Linux, full docs, telemetry opt-in. |
+| ~~**v0.3.0**~~ ✅ | Providers UI + Gateway | Settings panel for 28+ cloud/local providers. DeepSeek Anthropic gateway proxy (OpenAI Responses API → Anthropic). Per-agent model override. |
+| **v0.4.0** 🔄 | Local-inference autodetect | TypeScript probe system (Ollama `/api/tags`, LM Studio `/v1/models`, vLLM, llama.cpp). Scan button + discovered-model chips in Settings. Usage analytics backend (SQLite-based pricing + store). mDNS & Rust scanner remaining. |
+| **v0.5.0** | Token usage analytics | Dashboard UI — stacked-area charts, per-agent/provider/model breakdown. Cost estimation with live pricing table. Export CSV/JSON. Adapter `parseUsage()` hooks. |
+| **v0.6.0** | MCP Management | MCP server registry in Settings (add/edit/remove, stdio & SSE transports). Auto-discover running local MCP processes. Per-agent MCP binding. Bundled quick-add servers: filesystem, memory, fetch, git. |
+| **v0.7.0** | Browser & Computer Use | `browser-use` agent adapter (Python). Playwright MCP server quick-add. Anthropic computer-use mode toggle (bash / screenshot / text-editor tools). Screenshot side-panel in tab. |
+| **v0.8.0** | Web Search & Web Tools | Search provider settings (Brave, Tavily, Jina, Perplexity). One-click MCP server install for each. Per-agent search-enable toggle. Web page reader / URL fetcher as shared tool. |
+| **v0.9.0** | Skills & Custom Instructions | Per-agent, per-project skill files (`AGENTS.md`, `SKILL.md`, `.instructions.md`). Global skills library in Settings. Skill injection at spawn time. Skill marketplace (import from URL / GitHub). |
+| **v0.10.0** | Cron & Automation | Scheduled agent runs (cron-expression editor in Settings). Trigger types: time, file-watch, webhook, git-event. Per-job log persistence + desktop notification on finish/fail. |
+| **v0.11.0** | Unified long-term memory | SQLite + `sqlite-vec` embedding store. Background embed worker (Rust). MCP server `tday-memory` (`recall` / `remember` / `forget`). Per-project + global scopes. Memory browser + prune UI. |
+| **v0.12.0** | Performance & polish | xterm WebGL renderer. Lazy-render inactive tabs. Session snapshot/restore. Memory budget warnings. Profiling page (CPU/RSS/handles). |
+| **v0.13.0** | Plugins & extensibility | Adapter SDK (`AgentAdapter` public package). Third-party adapters via manifest URL. Custom themes. Plugin marketplace. |
+| **v0.14.0** | Sync & teams | Optional E2EE sync of memory + usage across devices. Team dashboards. Shared provider pools. |
+| **v1.0.0** | GA | Auto-update (Squirrel), signed & notarised builds for macOS/Windows/Linux, full docs site, telemetry opt-in. |
 
 ---
 
@@ -224,37 +248,120 @@ The acceptance criterion: **`npm run dev` opens a window with one tab running th
 - [ ] Secrets via Rust `keyring` crate (currently plaintext `~/.tday/providers.json`)
 - [ ] Per-tab provider override + "last-used" memory
 
-### v0.4.0 — Local-inference autodetect
-- [ ] Rust scanner: TCP probe + HTTP fingerprint
-  - Ollama: `GET /api/tags`
-  - LM Studio: `GET /v1/models` (port 1234)
-  - llama.cpp: `GET /v1/models` (port 8080)
-  - vLLM: `GET /v1/models` (port 8000)
-- [ ] mDNS discovery for LAN servers
-- [ ] Toast “Found Ollama with 7 models — add as provider?”
-- [ ] Watch loop with backoff
+### v0.4.0 — Local-inference autodetect 🔄
+- [x] TypeScript probe system (`discovery/probe.ts`, `specs.ts`, `index.ts`)
+  - [x] TCP pre-filter then HTTP fingerprint for each service
+  - [x] Ollama: `GET /api/tags` → `models[].name`
+  - [x] LM Studio: `GET /v1/models` → `data[].id` (port 1234)
+  - [x] vLLM: `GET /v1/models` (port 8000)
+  - [x] llama.cpp / LocalAI / Jan: `GET /v1/models` (port 8080 / 8080 / 1337)
+  - [x] SGLang: `GET /v1/models` (port 30000)
+  - [x] LAN host probe: configurable extra hosts + optional /24 subnet sweep
+- [x] `probeBaseUrl` for manual base-URL scan (tries `/models`, `/v1/models`, `/api/tags`)
+- [x] IPC channel `discovery:probe-url` wired in main process
+- [x] Settings UI: Scan button + latency badge + discovered-model chips + `discoveredModels` persistence
+- [x] Usage analytics backend
+  - [x] `usage/store.ts` — SQLite-backed append + query
+  - [x] `usage/pricing.ts` — per-model cost table for 30+ providers
+  - [x] IPC channels `usage:append` / `usage:query`
+  - [x] Usage tab skeleton in Settings
+- [ ] Rust scanner (`tday-core`) — TCP probe + HTTP fingerprint in native binary
+- [ ] mDNS/Bonjour discovery for LAN servers
+- [ ] Toast notification “Found Ollama with N models — add as provider?”
+- [ ] Background watch loop with exponential back-off
 
 ### v0.5.0 — Token usage analytics
-- [ ] SQLite schema: `usage(ts, tab_id, agent, provider, model, prompt_tok, completion_tok, cost_usd)`
-- [ ] Adapter `parseUsage()` hooks
-- [ ] Dashboard: stacked-area + table + filters
-- [ ] CSV/JSON export
+- [ ] Dashboard UI: stacked-area chart (per-agent/provider/model over time)
+- [ ] Per-tab usage mini-badge (tokens / estimated cost)
+- [ ] Adapter `parseUsage()` hooks scraping token counts from agent output
+- [ ] Live cost estimation using pricing table
+- [ ] CSV / JSON export
+- [ ] Budget alerts (configurable per-agent / global cap)
 
-### v0.6.0 — Unified long-term memory
-- [ ] `sqlite-vec` embedding store
-- [ ] Embed-on-write background worker (Rust)
-- [ ] MCP server `tday-memory` exposing `recall`, `remember`, `forget` to any agent
-- [ ] Per-project + global scopes
-- [ ] UI to browse, edit, prune memories
+### v0.6.0 — MCP Management
+MCP (Model Context Protocol) lets agents use tools, access resources, and receive prompts from external servers. Tday becomes the central registry for all MCP connections — configure once, available everywhere.
 
-### v0.7.0 — Performance & polish
+- [ ] **Settings → MCP Servers** tab
+  - [ ] Add / edit / remove MCP server entries (name, transport, command / URL, args, env)
+  - [ ] Transport types: `stdio` (local process), `SSE` (remote HTTP), `streamable-http`
+  - [ ] Per-server connection test + status badge
+- [ ] **Auto-discovery** of running local MCP processes (scan well-known ports, inspect `mcp.json`)
+- [ ] **Per-agent MCP binding** — choose which MCP servers each agent starts with
+- [ ] **Bundled quick-add server cards** in Settings:
+  - [ ] `@modelcontextprotocol/server-filesystem` — local file access
+  - [ ] `@modelcontextprotocol/server-memory` — persistent key-value memory
+  - [ ] `@modelcontextprotocol/server-fetch` — HTTP fetch / web page reader
+  - [ ] `@modelcontextprotocol/server-git` — Git log / diff / blame
+- [ ] Inject `--mcp-config <json>` into Claude Code / `opencode` / `gemini` at spawn time
+- [ ] MCP server log viewer inside the app
+
+### v0.7.0 — Browser & Computer Use
+Bring browser-automation and computer-use capabilities into Tday as first-class citizens — configure them once, launch them like any other agent tab.
+
+- [ ] **`browser-use` adapter** (`packages/adapters/browser-use`)
+  - [ ] `detect()` — checks `uv`/`pip` + `browser-use` install
+  - [ ] `buildLaunch()` — spawns `python -m browser_use` with task and provider env
+  - [ ] Install/update via Settings → Agents (runs `pip install browser-use`)
+  - [ ] Browser profile picker (default / incognito / custom profile path)
+  - [ ] Headless vs headed toggle
+- [ ] **Playwright MCP quick-add** — one-click add `@playwright/mcp` to MCP registry
+- [ ] **Anthropic computer-use mode** toggle for Claude Code
+  - [ ] Enables `bash`, `computer`, `text_editor` built-in tools
+  - [ ] Settings toggle per agent-profile
+  - [ ] Safety warning banner in UI
+- [ ] **Screenshot side-panel** — display screenshots emitted by computer-use tools inline in the tab
+
+### v0.8.0 — Web Search & Web Tools
+Give every agent instant access to the live web — configure search providers in Settings and inject them as MCP tools per agent.
+
+- [ ] **Settings → Web Search** sub-panel
+  - [ ] Provider cards: Brave Search, Tavily, Jina, Perplexity, SearXNG (self-hosted)
+  - [ ] API key input per provider (stored in OS keychain)
+  - [ ] Per-agent enable/disable toggle
+- [ ] **One-click MCP install** for each provider’s official MCP server
+- [ ] **Web page reader / URL fetcher** shared tool (via Jina Reader or `@modelcontextprotocol/server-fetch`)
+- [ ] Show active search provider badge on tab header
+
+### v0.9.0 — Skills & Custom Instructions
+Define reusable instruction files that are automatically injected into agent sessions.
+
+- [ ] **Skill file formats supported**: `AGENTS.md`, `SKILL.md`, `.instructions.md`, `CLAUDE.md`, `copilot-instructions.md`
+- [ ] **Project-level auto-discovery**: scan project root + `.github/` on each PTY spawn
+- [ ] **Global skills library** in Settings → Skills
+  - [ ] Create / edit / delete named skills (Markdown editor)
+  - [ ] Tag skills (language, framework, style, domain)
+  - [ ] Enable/disable per agent-kind
+- [ ] **Skill injection** at spawn time (`--system-prompt` / `--instructions` / temp context file)
+- [ ] **Skill marketplace** — import from GitHub URL or gist
+
+### v0.10.0 — Cron & Automation
+Run agents on a schedule or in response to events — unattended coding tasks, nightly reviews, automated reports.
+
+- [ ] **Settings → Automation** tab
+  - [ ] Job list: name, agent, provider, cwd, prompt/task, schedule
+  - [ ] Cron expression editor with human-readable preview
+  - [ ] One-shot / interval / cron schedule types
+- [ ] **Trigger types**: time (cron), file-watcher (`chokidar`), webhook (local HTTP), git hook
+- [ ] **Job execution**: spawn PTY session (optionally headless / minimised tab)
+- [ ] **Output persistence**: save full transcript per run to `~/.tday/runs/`
+- [ ] **Notifications**: desktop notification on success/fail
+- [ ] **Job history** panel: last N runs, exit code, duration, token cost
+
+### v0.11.0 — Unified long-term memory
+- [ ] `sqlite-vec` embedding store (Rust)
+- [ ] Background embed-on-write worker
+- [ ] MCP server `tday-memory` exposing `recall`, `remember`, `forget`
+- [ ] Per-project + global memory scopes
+- [ ] Memory browser UI (search, edit, prune, export)
+
+### v0.12.0 — Performance & polish
 - [ ] xterm WebGL renderer; benchmark vs canvas
 - [ ] Lazy-render inactive tabs
-- [ ] Session snapshot/restore
+- [ ] Session snapshot/restore (carry scrollback across restart)
 - [ ] Memory budget per tab; warn on leak
 - [ ] Profiling page (CPU/RSS/handles)
 
-### v0.8.0+ — see Roadmap table
+### v0.13.0+ — see Roadmap table
 
 ---
 
