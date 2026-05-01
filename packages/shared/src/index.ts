@@ -142,7 +142,84 @@ export const IPC = {
   agentInstallProgress: 'agent:install:progress',
   homeDir: 'app:home-dir', // renderer -> main: get HOME path
   pickDir: 'app:pick-dir', // renderer -> main: open folder picker
+  // Local service discovery
+  discoverServices: 'discovery:scan',
+  // Token usage statistics
+  usageAppend: 'usage:append',
+  usageQuery: 'usage:query',
 } as const;
+
+// ─── Discovery types ──────────────────────────────────────────────────────────
+
+export interface DiscoveredService {
+  kind: ProviderKind;
+  label: string;
+  /** OpenAI-compatible base URL, e.g. http://192.168.1.5:11434/v1 */
+  baseUrl: string;
+  models: string[];
+  latencyMs: number;
+}
+
+export interface DiscoverServicesRequest {
+  /** Additional hosts/IPs to probe beyond localhost. */
+  extraHosts?: string[];
+  /** Whether to scan the local /24 subnet. Default false. */
+  scanSubnet?: boolean;
+}
+
+// ─── Usage types ──────────────────────────────────────────────────────────────
+
+export interface UsageRecord {
+  ts: number;
+  agentId: AgentId | string;
+  providerId: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+}
+
+export interface UsageFilter {
+  fromTs?: number;
+  toTs?: number;
+  agentId?: string;
+  providerId?: string;
+}
+
+export interface ModelUsage {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  requests: number;
+  costUsd: number | null;
+}
+
+export interface AgentUsage {
+  agentId: string;
+  inputTokens: number;
+  outputTokens: number;
+  requests: number;
+  costUsd: number | null;
+}
+
+export interface DailyStat {
+  date: string;
+  inputTokens: number;
+  outputTokens: number;
+  requests: number;
+  costUsd: number | null;
+}
+
+export interface UsageSummary {
+  totalRequests: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCachedTokens: number;
+  costUsd: number | null;
+  byModel: Record<string, ModelUsage>;
+  byAgent: Record<string, AgentUsage>;
+  daily: DailyStat[];
+}
 
 export interface PtyDataEvent {
   tabId: string;

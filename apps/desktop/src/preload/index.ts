@@ -8,6 +8,11 @@ import {
   type SpawnRequest,
   type PtyDataEvent,
   type PtyExitEvent,
+  type DiscoveredService,
+  type DiscoverServicesRequest,
+  type UsageRecord,
+  type UsageFilter,
+  type UsageSummary,
 } from '@tday/shared';
 
 const api = {
@@ -51,6 +56,14 @@ const api = {
     ipcRenderer.on('tab:close', fn);
     return () => ipcRenderer.off('tab:close', fn);
   },
+  // ── Local service discovery ────────────────────────────────────────────────
+  discoverServices: (req: DiscoverServicesRequest = {}) =>
+    ipcRenderer.invoke(IPC.discoverServices, req) as Promise<DiscoveredService[]>,
+  // ── Token usage statistics ─────────────────────────────────────────────────
+  appendUsage: (record: UsageRecord) =>
+    ipcRenderer.invoke(IPC.usageAppend, record) as Promise<void>,
+  queryUsage: (filter: UsageFilter = {}) =>
+    ipcRenderer.invoke(IPC.usageQuery, filter) as Promise<UsageSummary>,
 };
 
 contextBridge.exposeInMainWorld('tday', api);

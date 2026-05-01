@@ -7,6 +7,9 @@ import type {
   ProviderProfile,
   ProvidersConfig,
   ProviderKind,
+  DiscoveredService,
+  UsageSummary,
+  UsageFilter,
 } from '@tday/shared';
 import { PROVIDER_PRESETS, presetForKind } from '@tday/shared';
 import { ProviderLogo } from './ProviderLogo';
@@ -17,7 +20,7 @@ interface Props {
   onSaved?: () => void;
 }
 
-type Section = 'providers' | 'agents';
+type Section = 'providers' | 'agents' | 'usage';
 
 export function Settings({ open, onClose, onSaved }: Props) {
   const [section, setSection] = useState<Section>('providers');
@@ -27,6 +30,11 @@ export function Settings({ open, onClose, onSaved }: Props) {
   const [savedTick, setSavedTick] = useState(0);
   const [installingId, setInstallingId] = useState<string | null>(null);
   const [installPct, setInstallPct] = useState(0);
+  const [discovering, setDiscovering] = useState(false);
+  const [discovered, setDiscovered] = useState<DiscoveredService[]>([]);
+  const [usageData, setUsageData] = useState<UsageSummary | null>(null);
+  const [usageRange, setUsageRange] = useState<7 | 30 | 90>(30);
+  const [usageAgentId, setUsageAgentId] = useState('');
   const SHARED_KEY = 'tday:sharedAgentConfig';
   const [shared, setShared] = useState<boolean>(() => {
     try {
@@ -56,6 +64,12 @@ export function Settings({ open, onClose, onSaved }: Props) {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // Load usage stats when usage section is active.
+  useEffect(() => {
+    if (section === 'usage') void loadUsage(usageRange, usageAgentId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [section, usageRange, usageAgentId]);
 
   const profile = useMemo(
     () => cfg?.profiles.find((p) => p.id === activeId) ?? null,
@@ -211,6 +225,48 @@ export function Settings({ open, onClose, onSaved }: Props) {
     }
   };
 
+  const runDiscovery = async () => {
+    setDiscovering(true);
+    try {
+      const results = await window.tday.discoverServices({});
+      setDiscovered(results);
+    } catch {
+      // ignore
+    } finally {
+      setDiscovering(false);
+    }
+  };
+
+  const addDiscoveredService = (svc: DiscoveredService) => {
+    if (!cfg) return;
+    const existing = cfg.profiles.find((p) => p.baseUrl === svc.baseUrl);
+    if (existing) { setActiveId(existing.id); return; }
+    const id = svc.kind + '-' + Date.now().toString(36);
+    const next: ProviderProfile = {
+      id,
+      label: svc.label,
+      kind: svc.kind,
+      apiStyle: 'openai',
+      baseUrl: svc.baseUrl,
+      model: svc.models[0] ?? '',
+      apiKey: '',
+    };
+    setCfg({ ...cfg, default: cfg.default ?? id, profiles: [...cfg.profiles, next] });
+    setActiveId(id);
+    setSection('providers');
+  };
+
+  const loadUsage = async (range: number, agentId: string) => {
+    const filter: UsageFilter = { fromTs: Date.now() - range * 24 * 60 * 60 * 1000 };
+    if (agentId) filter.agentId = agentId;
+    try {
+      const summary = await window.tday.queryUsage(filter);
+      setUsageData(summary);
+    } catch {
+      // ignore
+    }
+  };
+
   const installAgent = async (agentId: string, action: 'install' | 'update' | 'uninstall') => {
     setInstallingId(agentId);
     setInstallPct(0);
@@ -250,6 +306,9 @@ export function Settings({ open, onClose, onSaved }: Props) {
               </SectionTab>
               <SectionTab active={section === 'agents'} onClick={() => setSection('agents')}>
                 Agents
+              </SectionTab>
+              <SectionTab active={section === 'usage'} onClick={() => setSection('usage')}>
+                Usage
               </SectionTab>
             </div>
             <div className="flex items-center gap-3">
@@ -308,6 +367,44 @@ export function Settings({ open, onClose, onSaved }: Props) {
                     ))}
                   </div>
                 </details>
+                {/* Auto-detect local AI services */}
+                <div className="mt-3 border-t border-zinc-800/60 pt-2">
+                  <button
+                    onClick={() => void runDiscovery()}
+                    disabled={discovering}
+                    className="flex w-full items-center gap-1.5 rounded-md px-2 py-2 text-left text-[11px] text-sky-400 hover:bg-zinc-900 disabled:opacity-60"
+                  >
+                    <span>{discovering ? '⟳' : '⊕'}</span>
+                    {discovering ? 'Scanning…' : 'Auto-detect local'}
+                  </button>
+                  {discovered.length > 0 ? (
+                    <div className="mt-1 space-y-1">
+                      {discovered.map((svc) => (
+                        <div
+                          key={svc.baseUrl}
+                          className="rounded-md border border-zinc-800/60 bg-zinc-900/60 p-2"
+                        >
+                          <div className="flex items-center justify-between gap-1">
+                            <div className="min-w-0">
+                              <div className="truncate text-[11px] font-medium text-zinc-200">
+                                {svc.label}
+                              </div>
+                              <div className="truncate text-[10px] text-zinc-500">
+                                {svc.models.length} model{svc.models.length !== 1 ? 's' : ''} · {svc.latencyMs}ms
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => addDiscoveredService(svc)}
+                              className="shrink-0 rounded bg-sky-500/20 px-1.5 py-0.5 text-[10px] text-sky-300 hover:bg-sky-500/40"
+                            >
+                              Add
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
               </div>
               <div className="scroll-themed flex-1 overflow-y-auto p-5 text-xs">
                 {profile && profilePreset ? (
@@ -429,7 +526,7 @@ export function Settings({ open, onClose, onSaved }: Props) {
                 )}
               </div>
             </div>
-          ) : (
+          ) : section === 'agents' ? (
             <div className="scroll-themed flex-1 overflow-y-auto p-4">
               <p className="px-2 pb-2 text-[11px] text-zinc-500">
                 Bind a provider to a harness agent — every new tab launches that agent
@@ -592,7 +689,159 @@ export function Settings({ open, onClose, onSaved }: Props) {
                 })}
               </div>
             </div>
-          )}
+          ) : section === 'usage' ? (
+            <div className="scroll-themed flex-1 overflow-y-auto p-5 text-xs">
+              {/* Filters */}
+              <div className="mb-4 flex flex-wrap items-center gap-3">
+                <div className="flex gap-1">
+                  {([7, 30, 90] as const).map((d) => (
+                    <button
+                      key={d}
+                      onClick={() => setUsageRange(d)}
+                      className={`rounded-md px-2.5 py-1 text-[11px] transition-colors ${
+                        usageRange === d
+                          ? 'bg-fuchsia-500/20 text-fuchsia-200'
+                          : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800'
+                      }`}
+                    >
+                      {d}d
+                    </button>
+                  ))}
+                </div>
+                <select
+                  className="input h-6 py-0 text-[11px]"
+                  value={usageAgentId}
+                  onChange={(e) => setUsageAgentId(e.target.value)}
+                >
+                  <option value="">All agents</option>
+                  {agents.map((a) => (
+                    <option key={a.id} value={a.id}>{a.displayName}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => void loadUsage(usageRange, usageAgentId)}
+                  className="rounded-md px-2.5 py-1 text-[11px] bg-zinc-900 text-zinc-400 hover:bg-zinc-800"
+                >
+                  Refresh
+                </button>
+              </div>
+
+              {usageData ? (
+                <>
+                  {/* Summary cards */}
+                  <div className="mb-4 grid grid-cols-4 gap-2">
+                    <StatCard label="Requests" value={String(usageData.totalRequests)} />
+                    <StatCard label="Input tokens" value={fmtNum(usageData.totalInputTokens)} />
+                    <StatCard label="Output tokens" value={fmtNum(usageData.totalOutputTokens)} />
+                    <StatCard
+                      label="Est. cost"
+                      value={
+                        usageData.costUsd === null
+                          ? '—'
+                          : usageData.costUsd === 0
+                          ? 'Free'
+                          : `$${usageData.costUsd.toFixed(4)}`
+                      }
+                    />
+                  </div>
+
+                  {/* Daily bar chart */}
+                  {usageData.daily.length > 0 ? (
+                    <div className="mb-4">
+                      <div className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">
+                        Daily tokens ({usageRange}d)
+                      </div>
+                      <DailyBarChart data={usageData.daily} />
+                    </div>
+                  ) : null}
+
+                  {/* Model breakdown */}
+                  {Object.keys(usageData.byModel).length > 0 ? (
+                    <div className="mb-4">
+                      <div className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">
+                        By model
+                      </div>
+                      <div className="overflow-hidden rounded-md border border-zinc-800/60">
+                        <table className="w-full text-[11px]">
+                          <thead>
+                            <tr className="border-b border-zinc-800/60 text-zinc-500">
+                              <th className="px-3 py-1.5 text-left font-normal">Model</th>
+                              <th className="px-3 py-1.5 text-right font-normal">Reqs</th>
+                              <th className="px-3 py-1.5 text-right font-normal">Input</th>
+                              <th className="px-3 py-1.5 text-right font-normal">Output</th>
+                              <th className="px-3 py-1.5 text-right font-normal">Cost</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.entries(usageData.byModel).map(([model, m]) => (
+                              <tr
+                                key={model}
+                                className="border-b border-zinc-800/40 last:border-0 hover:bg-zinc-900/40"
+                              >
+                                <td className="max-w-[180px] truncate px-3 py-1.5 font-mono text-zinc-300">
+                                  {model}
+                                </td>
+                                <td className="px-3 py-1.5 text-right text-zinc-400">{m.requests}</td>
+                                <td className="px-3 py-1.5 text-right text-zinc-400">
+                                  {fmtNum(m.inputTokens)}
+                                </td>
+                                <td className="px-3 py-1.5 text-right text-zinc-400">
+                                  {fmtNum(m.outputTokens)}
+                                </td>
+                                <td className="px-3 py-1.5 text-right text-zinc-400">
+                                  {m.costUsd === null ? '—' : m.costUsd === 0 ? 'Free' : `$${m.costUsd.toFixed(4)}`}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {/* Agent breakdown */}
+                  {Object.keys(usageData.byAgent).length > 0 ? (
+                    <div>
+                      <div className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">
+                        By agent
+                      </div>
+                      <div className="overflow-hidden rounded-md border border-zinc-800/60">
+                        <table className="w-full text-[11px]">
+                          <thead>
+                            <tr className="border-b border-zinc-800/60 text-zinc-500">
+                              <th className="px-3 py-1.5 text-left font-normal">Agent</th>
+                              <th className="px-3 py-1.5 text-right font-normal">Reqs</th>
+                              <th className="px-3 py-1.5 text-right font-normal">Tokens</th>
+                              <th className="px-3 py-1.5 text-right font-normal">Cost</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.entries(usageData.byAgent).map(([agId, ag]) => (
+                              <tr
+                                key={agId}
+                                className="border-b border-zinc-800/40 last:border-0 hover:bg-zinc-900/40"
+                              >
+                                <td className="px-3 py-1.5 text-zinc-300">{agId}</td>
+                                <td className="px-3 py-1.5 text-right text-zinc-400">{ag.requests}</td>
+                                <td className="px-3 py-1.5 text-right text-zinc-400">
+                                  {fmtNum(ag.inputTokens + ag.outputTokens)}
+                                </td>
+                                <td className="px-3 py-1.5 text-right text-zinc-400">
+                                  {ag.costUsd === null ? '—' : ag.costUsd === 0 ? 'Free' : `$${ag.costUsd.toFixed(4)}`}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <p className="text-zinc-500">No usage data. Start a conversation to record tokens.</p>
+              )}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
@@ -661,3 +910,81 @@ const Field = memo(function Field({
     </label>
   );
 });
+
+function fmtNum(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+  return String(n);
+}
+
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-zinc-800/60 bg-zinc-900/60 p-3 text-center">
+      <div className="text-[10px] uppercase tracking-wider text-zinc-500">{label}</div>
+      <div className="mt-1 text-lg font-semibold text-zinc-100">{value}</div>
+    </div>
+  );
+}
+
+function DailyBarChart({ data }: { data: Array<{ date: string; inputTokens: number; outputTokens: number }> }) {
+  const maxTokens = Math.max(...data.map((d) => d.inputTokens + d.outputTokens), 1);
+  const barW = Math.max(4, Math.floor(720 / data.length) - 2);
+  const chartH = 60;
+  return (
+    <div className="overflow-x-auto">
+      <svg
+        width={data.length * (barW + 2)}
+        height={chartH + 18}
+        className="block"
+        style={{ minWidth: '100%' }}
+      >
+        {data.map((d, i) => {
+          const total = d.inputTokens + d.outputTokens;
+          const totalH = Math.round((total / maxTokens) * chartH);
+          const inputH = Math.round((d.inputTokens / maxTokens) * chartH);
+          const outputH = totalH - inputH;
+          const x = i * (barW + 2);
+          return (
+            <g key={d.date}>
+              {/* output tokens (top, lighter) */}
+              {outputH > 0 && (
+                <rect
+                  x={x} y={chartH - totalH}
+                  width={barW} height={outputH}
+                  fill="#a78bfa" opacity={0.7}
+                />
+              )}
+              {/* input tokens (bottom, brighter) */}
+              {inputH > 0 && (
+                <rect
+                  x={x} y={chartH - inputH}
+                  width={barW} height={inputH}
+                  fill="#c084fc" opacity={0.9}
+                />
+              )}
+              {/* date label — show every ~7 bars */}
+              {i % Math.ceil(data.length / 8) === 0 ? (
+                <text
+                  x={x + barW / 2} y={chartH + 13}
+                  fontSize={8} fill="#71717a" textAnchor="middle"
+                >
+                  {d.date.slice(5)}
+                </text>
+              ) : null}
+            </g>
+          );
+        })}
+      </svg>
+      <div className="mt-1 flex items-center gap-3 text-[10px] text-zinc-500">
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-2 w-2 rounded-sm bg-fuchsia-400/90" />
+          Input
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-2 w-2 rounded-sm bg-violet-400/70" />
+          Output
+        </span>
+      </div>
+    </div>
+  );
+}

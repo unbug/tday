@@ -16,6 +16,7 @@ import { convertInput } from './bridge/input.js';
 import { convertTools, convertToolChoice, mutateDsRequest } from './bridge/tools.js';
 import { convertAnthropicResponse, buildStoredMessages, buildStoredMessagesFromStream, normalizeUsage } from './bridge/response.js';
 import { AnthropicStreamConverter } from './bridge/stream.js';
+import { appendUsage } from '../usage/store.js';
 
 // ─── HTTP utilities ───────────────────────────────────────────────────────────
 
@@ -82,7 +83,7 @@ export class CodexDeepSeekAnthropicAdapter implements GatewayAdapter {
     const server = createServer((req, res) => {
       const url = new URL(req.url ?? '/', 'http://127.0.0.1');
       if (req.method === 'POST' && url.pathname.replace(/\/$/, '') === '/responses') {
-        void this.handleResponses(req, res, ctx.provider).catch((err: unknown) => {
+        void this.handleResponses(req, res, ctx.provider, ctx.agentId).catch((err: unknown) => {
           console.error('[tday] gateway error:', err);
           if (!res.headersSent) {
             sendJson(res, 500, { error: { message: String(err), type: 'gateway_error' } });
@@ -144,6 +145,7 @@ export class CodexDeepSeekAnthropicAdapter implements GatewayAdapter {
     req: IncomingMessage,
     res: ServerResponse,
     provider: ProviderProfile,
+    agentId: string,
   ): Promise<void> {
     const body = await readRequestJson(req);
     const responseId = `resp_tday_${Date.now().toString(36)}`;
@@ -203,6 +205,15 @@ export class CodexDeepSeekAnthropicAdapter implements GatewayAdapter {
       const json = await upstream.json() as AResponse;
       const { output, outputText } = convertAnthropicResponse(json, thinkingState, responseId);
       this.conversations.set(responseId, [...allMessages, ...buildStoredMessages(json.content)]);
+      appendUsage({
+        ts: Date.now(),
+        agentId,
+        providerId: provider.id,
+        model: typeof body.model === 'string' ? body.model : '',
+        inputTokens: json.usage?.input_tokens ?? 0,
+        outputTokens: json.usage?.output_tokens ?? 0,
+        cachedTokens: json.usage?.cache_read_input_tokens ?? 0,
+      });
       sendJson(res, 200, {
         ...baseResponse(responseId, body.model, 'completed', output),
         output_text: outputText,
@@ -228,6 +239,9 @@ export class CodexDeepSeekAnthropicAdapter implements GatewayAdapter {
     const converter = new AnthropicStreamConverter(responseId, body.model, thinkingState, hasToolHistory);
     const parser = new SseParser();
     const decoder = new TextDecoder();
+    let streamInputTokens = 0;
+    let streamOutputTokens = 0;
+    let streamCachedTokens = 0;
 
     /**
      * Forward converted SSE events to the client, one character at a time.
@@ -248,6 +262,14 @@ export class CodexDeepSeekAnthropicAdapter implements GatewayAdapter {
      */
     const emitEvents = async (events: ReturnType<typeof parser.push>) => {
       for (let i = 0; i < events.length; i++) {
+        // Capture usage from message_start (input) and message_delta (output)
+        const ev = events[i];
+        if (ev.type === 'message_start' && ev.message?.usage) {
+          streamInputTokens = ev.message.usage.input_tokens ?? 0;
+          streamCachedTokens = ev.message.usage.cache_read_input_tokens ?? 0;
+        } else if (ev.type === 'message_delta' && ev.usage) {
+          streamOutputTokens = ev.usage.output_tokens ?? 0;
+        }
         for (const { event: evName, data } of converter.processEvent(events[i])) {
           if (evName === 'response.output_text.delta') {
             // Spread into Unicode codepoints so multi-byte / emoji chars are
@@ -286,6 +308,15 @@ export class CodexDeepSeekAnthropicAdapter implements GatewayAdapter {
       responseId,
       [...allMessages, ...buildStoredMessagesFromStream(output, completedReasoningText)],
     );
+    appendUsage({
+      ts: Date.now(),
+      agentId,
+      providerId: provider.id,
+      model: typeof body.model === 'string' ? body.model : '',
+      inputTokens: streamInputTokens,
+      outputTokens: streamOutputTokens,
+      cachedTokens: streamCachedTokens,
+    });
     res.write('data: [DONE]\n\n');
     res.end();
   }

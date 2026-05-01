@@ -26,8 +26,12 @@ import {
   type ProviderProfile,
   type ProvidersConfig,
   type SpawnRequest,
+  type UsageRecord,
+  type UsageFilter,
 } from '@tday/shared';
 import { createLocalGatewayManager } from './gateway';
+import { discoverLocalServices } from './discovery/index.js';
+import { appendUsage, queryUsage } from './usage/store.js';
 
 const TDAY_DIR = join(homedir(), '.tday');
 const localGatewayManager = createLocalGatewayManager();
@@ -770,6 +774,19 @@ function registerIpc(): void {
   );
   ipcMain.handle(IPC.agentUninstall, (event, agentId: AgentId) =>
     runNpmGlobal(event, agentId, 'uninstall'),
+  );
+
+  // ── Local service discovery ────────────────────────────────────────────────
+  ipcMain.handle(IPC.discoverServices, (_e, req: { extraHosts?: string[]; scanSubnet?: boolean } = {}) =>
+    discoverLocalServices({ extraHosts: req.extraHosts, scanSubnet: req.scanSubnet }),
+  );
+
+  // ── Token usage statistics ─────────────────────────────────────────────────
+  ipcMain.handle(IPC.usageAppend, (_e, record: UsageRecord) => {
+    appendUsage(record);
+  });
+  ipcMain.handle(IPC.usageQuery, (_e, filter: UsageFilter = {}) =>
+    queryUsage(filter),
   );
 }
 
