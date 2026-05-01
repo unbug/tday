@@ -46,6 +46,8 @@ function agentTitle(id: AgentId): string {
       return 'Claude';
     case 'codex':
       return 'Codex';
+    case 'copilot':
+      return 'Copilot';
     case 'opencode':
       return 'OpenCode';
     case 'gemini':
@@ -362,7 +364,7 @@ export default function App() {
             </button>
           ))}
           {/* Split new-tab button: click body opens the default agent.
-              Hovering the ▾ (or the wrapper) auto-opens the picker so the
+              Hovering the chevron (or the wrapper) auto-opens the picker so the
               user doesn't have to click twice. A short close delay keeps
               the menu open while the cursor crosses the gap to it. */}
           <div
@@ -383,7 +385,9 @@ export default function App() {
               title="Choose agent"
               aria-label="Choose agent"
             >
-              ▾
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M2 3.5 L5 6.5 L8 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
             </button>
             {showAgentMenu ? (
               <div
@@ -397,6 +401,7 @@ export default function App() {
                     'pi',
                     'claude-code',
                     'codex',
+                    'copilot',
                     'opencode',
                     'gemini',
                     'qwen-code',

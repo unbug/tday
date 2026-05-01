@@ -1,8 +1,8 @@
 # Tday — The Ultimate Harness Agent Terminal Launcher
 
-> One terminal launcher for every coding-agent harness — Claude Code, Codex, OpenCode, Pi, and more. Browser-style tabs, unified provider config, auto-detected local inference, long-term memory, and cross-agent token analytics.
+> One terminal launcher for every coding-agent harness — Claude Code, Codex, Copilot CLI, OpenCode, Pi, and more. Browser-style tabs, unified provider config, auto-detected local inference, long-term memory, and cross-agent token analytics.
 
-[![status](https://img.shields.io/badge/status-alpha-orange)]() [![v0.1.12](https://img.shields.io/badge/release-v0.1.12-blue)]()
+[![latest](https://img.shields.io/badge/release-v0.1.22-blue)](https://github.com/unbug/tday/releases)
 
 <p align="center">
   <a href="https://x.com/i/status/2049935301808935356">
@@ -15,12 +15,25 @@
   </a>
 </p>
 
+<p align="center">
+  <img
+    width="49%"
+    alt="Tday Screenshot 1"
+    src="https://github.com/user-attachments/assets/77499913-ef2b-40a0-a0d3-88b779e337a0"
+  />
+  <img
+    width="49%"
+    alt="Tday Screenshot 2"
+    src="https://github.com/user-attachments/assets/1964db7f-2db3-4eed-92a7-65eb172d33ed"
+  />
+</p>
+
 
 ---
 
 ## 1. Vision
 
-Today, every coding-agent harness ships with its own CLI, its own provider config, its own memory format, and its own token accounting. Power users juggle Claude Code in one tab, Codex in another, OpenCode in a third — each a separate terminal, each re-keyed, each forgetful.
+Today, every coding-agent harness ships with its own CLI, its own provider config, its own memory format, and its own token accounting. Power users juggle Claude Code in one tab, Codex in another, Copilot CLI in a third, OpenCode in a fourth — each a separate terminal, each re-keyed, each forgetful.
 
 **Tday** is the missing meta-layer:
 
@@ -48,10 +61,14 @@ Today, every coding-agent harness ships with its own CLI, its own provider confi
 │                          ▼                                          │
 │  Main Process (Electron + Node)                                     │
 │  ├─ Session Service       (one PTY per tab via node-pty)            │
-│  ├─ Agent Adapter Registry (pi, claude-code, codex, opencode, …)    │
+│  ├─ Agent Adapter Registry (pi, claude-code, codex, copilot, opencode, …)    │
 │  ├─ Provider Service       (env-var injection + secret store)       │
 │  ├─ IPC Bridge             (typed channels)                         │
-│  └─ Spawns: tday-core (Rust)                                     │
+│  ├─ Gateway (local HTTP proxy: OpenAI Responses API → Anthropic)    │
+│  │    ├─ bridge/  (input · tools · response · stream conversion)    │
+│  │    ├─ anthropic/  (HTTP client + SSE parser)                     │
+│  │    └─ deepseek/   (thinking encoder · per-session state cache)   │
+│  └─ Spawns: tday-core (Rust)                                        │
 │                          ▲                                          │
 │                          │ JSON-RPC over stdio / Unix socket        │
 │                          ▼                                          │
@@ -74,7 +91,40 @@ Today, every coding-agent harness ships with its own CLI, its own provider confi
 | Detection / tokenization / memory | Rust (`tday-core`) | CPU-bound, must not block UI. Static binary, easy to ship & cross-compile. |
 | Provider secrets | OS keychain via Rust | Avoid plaintext in app data; cross-platform. |
 
-### Agent adapter contract
+### Gateway — OpenAI Responses API → Anthropic proxy
+
+Some harnesses (e.g. Codex) only speak the **OpenAI Responses API**. Tday ships a lightweight in-process HTTP gateway that transparently translates those calls to the **Anthropic Messages API**, enabling DeepSeek and any other Anthropic-compatible provider to be used with every harness without patching the harness.
+
+```
+Harness (Codex)              Main Process
+       │  POST /v1/responses      │
+       │ ─────────────────────▶  │
+       │                   bridge/input   (OpenAI Responses → Anthropic Messages)
+       │                   bridge/tools   (tool / tool-choice conversion)
+       │                   deepseek/      (thinking-block encode/decode, V4 mutations)
+       │                   anthropic/     (HTTP POST + SSE stream from provider)
+       │                   bridge/stream  (Anthropic SSE → OpenAI SSE events)
+       │  SSE stream              │
+       │ ◀─────────────────────  │
+```
+
+**Module map** (`apps/desktop/src/main/gateway/`):
+
+| Module | Responsibility |
+|---|---|
+| `adapter.ts` | Express server, request dispatch, error handling |
+| `types.ts` | Shared gateway interfaces (Request, Response, …) |
+| `anthropic/types.ts` | Anthropic Messages API type definitions |
+| `anthropic/client.ts` | HTTP client, SSE tokeniser |
+| `openai/types.ts` | OpenAI Responses API type definitions |
+| `bridge/input.ts` | Convert OpenAI input items → Anthropic messages array |
+| `bridge/tools.ts` | Convert OpenAI tools → Anthropic ATool[], apply DeepSeek mutations |
+| `bridge/response.ts` | Convert Anthropic non-streaming response → OpenAI output |
+| `bridge/stream.ts` | Convert Anthropic SSE events → OpenAI Responses API SSE |
+| `deepseek/thinking.ts` | Encode / decode extended thinking blocks (prefix-based) |
+| `deepseek/state.ts` | Per-session LRU cache for (thinking, signature) pairs |
+
+
 
 Every harness is a thin adapter:
 
@@ -103,9 +153,9 @@ A **Tab** owns one **Session** = one PTY process bound to one agent adapter, one
 
 | Version | Theme | Highlights |
 |---|---|---|
-| **v0.1.0** | _Walk_ — Pi end-to-end | Single-tab MVP. Spawn the `pi` agent in a PTY tab. Static provider config from a JSON file. Border-beam shell. |
-| **v0.2.0** | Multi-agent, multi-tab | Adapters for Claude Code, Codex, OpenCode. Tab manager (open/close/reorder/duplicate). Per-tab cwd picker. |
-| **v0.3.0** | Providers UI | Settings panel for cloud providers (DeepSeek, OpenRouter, Anthropic, OpenAI, Groq, Together, …). Secrets in OS keychain. Per-tab provider override. |
+| ~~**v0.1.0**~~ ✅ | _Walk_ — Pi end-to-end | Single-tab MVP. Spawn the `pi` agent in a PTY tab. Static provider config from a JSON file. Border-beam shell. |
+| ~~**v0.2.0**~~ ✅ | Multi-agent, multi-tab | Adapters for Claude Code, Codex, Copilot CLI, OpenCode. Tab manager (open/close/reorder/duplicate). Per-tab cwd picker. |
+| ~~**v0.3.0**~~ ✅ | Providers UI + Gateway | Settings panel for 28 cloud/local providers. DeepSeek Anthropic gateway proxy (OpenAI Responses API → Anthropic). Per-agent model override. |
 | **v0.4.0** | Local-inference autodetect | Rust scanner polls `localhost:11434` (Ollama), `:1234` (LM Studio), `:8080` (llama.cpp), `:8000` (vLLM). Auto-add discovered endpoints with their model lists. mDNS for LAN. |
 | **v0.5.0** | Token usage analytics | Per-tab, per-agent, per-provider, per-model accounting. Cost estimation. Charts. Export CSV/JSON. |
 | **v0.6.0** | Unified long-term memory | SQLite + `sqlite-vec`. Cross-agent recall via MCP-server bridge that every adapter can mount. Per-project scoping. |
@@ -118,7 +168,7 @@ A **Tab** owns one **Session** = one PTY process bound to one agent adapter, one
 
 ## 4. Detailed Task Breakdown
 
-### v0.1.0 — Pi end-to-end (shipped)
+### v0.1.0 — Pi end-to-end ✅
 
 The acceptance criterion: **`npm run dev` opens a window with one tab running the `pi` agent in a real PTY; typing works, output streams, resizing works, closing the tab kills the process cleanly.**
 
@@ -153,23 +203,24 @@ The acceptance criterion: **`npm run dev` opens a window with one tab running th
   - [x] `pnpm build` produces signed-null `.dmg` + `.zip` for arm64 and x64
   - [ ] CI: lint + typecheck + `cargo check`
 
-### v0.2.0 — Multi-agent, multi-tab (shipped, ahead of schedule)
-- [x] Adapters: `pi`, `claude-code`, `codex`, `opencode` (install / update / uninstall via `npm i -g`)
+### v0.2.0 — Multi-agent, multi-tab ✅
+- [x] Adapters: `pi`, `claude-code`, `codex`, `copilot`, `opencode` (install / update / uninstall via `npm i -g`)
 - [x] Tab bar with drag-reorder + multi-row wrap
-- [x] Split new-tab button: default agent on click, dropdown picker for any installed harness
+- [x] Split new-tab button: default agent on click, dropdown chevron picker for any installed harness
 - [x] Configurable default agent in Settings → Agents
 - [x] Per-tab cwd staging + commit (Enter / Apply ↵ / Browse), restart-on-commit, last-cwd persistence
 - [x] **Persist open tabs across restart** (id, title, agent, cwd)
 - [ ] Transcript snapshots (carry scrollback across restart)
 - [ ] `Cmd+T` / `Cmd+Shift+T` keyboard shortcuts
 
-### v0.3.0 — Providers UI (largely shipped)
-- [x] CRUD UI for provider profiles (sidebar list + "+ Add provider" picker)
-- [x] Built-in templates for 22 vendors (OpenClaw mirror): DeepSeek, OpenAI, Anthropic, Google Gemini, xAI, Groq, Mistral, Moonshot, Cerebras, Together, Fireworks, Z.AI, Qwen, Volcengine, MiniMax, StepFun, OpenRouter, Ollama, LM Studio, Vercel AI Gateway, LiteLLM, Custom
+### v0.3.0 — Providers UI + Gateway ✅
+- [x] CRUD UI for provider profiles (sidebar list + "+ Add provider" picker, default-expanded)
+- [x] Built-in templates for **28 vendors** (OpenClaw mirror): DeepSeek, OpenAI, Anthropic, Google Gemini, xAI, Groq, Mistral, Moonshot, Cerebras, Together, Fireworks, Z.AI, Qwen, Volcengine, MiniMax, StepFun, OpenRouter, NVIDIA NIM, Hugging Face, Perplexity, Amazon Bedrock, SGLang, vLLM, Ollama, LM Studio, Vercel AI Gateway, LiteLLM, Custom
 - [x] Dual base-URL selector (OpenAI-compatible vs Anthropic-compatible) for **every** provider
 - [x] Latest-models dropdown per provider (freeform input still allowed)
-- [x] Per-agent provider binding + per-agent model override (CLI flag projection — Codex / Claude / OpenCode honour Tday's model setting instead of falling back to their own config files)
+- [x] Per-agent provider binding + per-agent model override (CLI flag projection — Codex / Claude / OpenCode honour Tday's model setting)
 - [x] "Use one provider/model for all agents" shared-config toggle
+- [x] **DeepSeek Anthropic gateway proxy** — in-process HTTP server translating OpenAI Responses API → Anthropic Messages API; supports streaming, extended thinking, tool use, multi-turn (113 unit tests, 12 modules)
 - [ ] Secrets via Rust `keyring` crate (currently plaintext `~/.tday/providers.json`)
 - [ ] Per-tab provider override + "last-used" memory
 

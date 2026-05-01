@@ -23,11 +23,14 @@ import {
   type AgentInstallEvent,
   type AgentInstallSpec,
   type AgentsConfig,
+  type ProviderProfile,
   type ProvidersConfig,
   type SpawnRequest,
 } from '@tday/shared';
+import { createLocalGatewayManager } from './gateway';
 
 const TDAY_DIR = join(homedir(), '.tday');
+const localGatewayManager = createLocalGatewayManager();
 
 /**
  * Augment process.env.PATH with common locations where Node toolchains live
@@ -197,6 +200,13 @@ const INSTALL_SPECS: Record<AgentId, AgentInstallSpec | undefined> = {
     npmPackage: '@openai/codex',
     bin: 'codex',
   },
+  copilot: {
+    agentId: 'copilot',
+    displayName: 'Copilot CLI',
+    description: "GitHub's terminal coding agent (npm: @github/copilot)",
+    npmPackage: '@github/copilot',
+    bin: 'copilot',
+  },
   opencode: {
     agentId: 'opencode',
     displayName: 'OpenCode',
@@ -286,6 +296,38 @@ function normalizeLaunchCwd(cwd: string | undefined): string {
   return homedir();
 }
 
+function appendNoProxy(env: Record<string, string>, hosts: string[]): void {
+  const existing = new Set(
+    `${env.NO_PROXY ?? ''},${env.no_proxy ?? ''}`
+      .split(',')
+      .map((host) => host.trim())
+      .filter(Boolean),
+  );
+  for (const host of hosts) existing.add(host);
+  const value = Array.from(existing).join(',');
+  env.NO_PROXY = value;
+  env.no_proxy = value;
+}
+
+function normalizeProviderProfile(provider: ProviderProfile): ProviderProfile {
+  const apiStyle = provider.apiStyle ?? 'openai';
+  if (
+    provider.kind === 'deepseek' &&
+    apiStyle === 'openai' &&
+    provider.baseUrl?.replace(/\/$/, '') === 'https://api.deepseek.com/v1'
+  ) {
+    return { ...provider, apiStyle, baseUrl: 'https://api.deepseek.com' };
+  }
+  return provider.apiStyle ? provider : { ...provider, apiStyle };
+}
+
+function normalizeProvidersConfig(config: ProvidersConfig): ProvidersConfig {
+  return {
+    ...config,
+    profiles: config.profiles.map(normalizeProviderProfile),
+  };
+}
+
 /**
  * Map our internal `ProviderKind` to the provider id that opencode uses
  * internally (https://opencode.ai/docs/providers/). For unknown kinds we
@@ -364,13 +406,9 @@ function modelFlagsFor(
     case 'codex': {
       const args: string[] = ['--model', model];
       // codex 0.50+ requires `wire_api = "responses"`; the legacy
-      // `"chat"` value is rejected at config-load time:
-      //   https://github.com/openai/codex/discussions/7782
-      // We therefore *always* synthesise a Responses-API provider entry.
-      // If the user binds a chat-only vendor (DeepSeek, Moonshot, Groq…)
-      // codex will surface a clear 404 from the upstream endpoint — the
-      // fix on the user's side is to pick a Responses-capable provider
-      // (OpenAI, OpenRouter, LM Studio ≥ 0.3, Anthropic-dialect, …).
+      // `"chat"` value is rejected at config-load time. For chat-only
+      // vendors that we know how to adapt, the caller passes a local
+      // Responses-compatible proxy URL as `baseUrl`.
       const envKey = providerKind ? envKeyForKind(providerKind, apiStyle) : 'OPENAI_API_KEY';
       args.push('-c', 'model_provider="tday"');
       args.push('-c', 'model_providers.tday.name="Tday"');
@@ -386,6 +424,8 @@ function modelFlagsFor(
       args.push('-c', `model_metadata.${metaKey}.max_output_tokens=8192`);
       return args;
     }
+    case 'copilot':
+      return ['--model', model];
     case 'crush':
     case 'hermes':
     case 'pi':
@@ -453,9 +493,11 @@ function loadAgents(): AgentsConfig {
   return readJson<AgentsConfig>(join(TDAY_DIR, 'agents.json'), {});
 }
 function loadProviders(): ProvidersConfig {
-  return readJson<ProvidersConfig>(join(TDAY_DIR, 'providers.json'), {
-    profiles: [],
-  });
+  return normalizeProvidersConfig(
+    readJson<ProvidersConfig>(join(TDAY_DIR, 'providers.json'), {
+      profiles: [],
+    }),
+  );
 }
 
 const ptys = new Map<string, IPty>();
@@ -559,9 +601,10 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.providersSave, (_e, next: ProvidersConfig) => {
     if (!existsSync(TDAY_DIR)) mkdirSync(TDAY_DIR, { recursive: true });
+    const normalized = normalizeProvidersConfig(next);
     writeFileSync(
       join(TDAY_DIR, 'providers.json'),
-      JSON.stringify(next, null, 2) + '\n',
+      JSON.stringify(normalized, null, 2) + '\n',
     );
     return { ok: true };
   });
@@ -632,15 +675,25 @@ function registerIpc(): void {
       // config file (~/.codex/config.toml etc.) and ignore Tday's setting.
       cmd = piLike.cmd;
       const userArgs = (agentConf.args ?? []).slice();
+      const gatewayResolution =
+        effectiveProvider
+          ? await localGatewayManager.resolve({
+              agentId: req.agentId,
+              provider: effectiveProvider,
+            })
+          : null;
       const modelArgs = modelFlagsFor(
         req.agentId,
         effectiveProvider?.model,
         effectiveProvider?.kind,
         effectiveProvider?.apiStyle,
-        effectiveProvider?.baseUrl,
+        gatewayResolution?.baseUrl ?? effectiveProvider?.baseUrl,
       );
       args = [...modelArgs, ...userArgs];
       env = piLike.env;
+      if (gatewayResolution?.noProxyHosts?.length) {
+        appendNoProxy(env, gatewayResolution.noProxyHosts);
+      }
       launchCwd = normalizeLaunchCwd(piLike.cwd);
     }
 
@@ -990,6 +1043,7 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   shuttingDown = true;
+  localGatewayManager.close();
   killAllPtys();
 });
 

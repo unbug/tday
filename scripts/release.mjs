@@ -30,6 +30,8 @@ for (const rel of targets) {
   console.log(`[release] ${rel} -> ${next}`);
 }
 
+console.log(`[release] typechecking...`);
+execSync('pnpm --filter @tday/desktop typecheck', { stdio: 'inherit', cwd: root });
 console.log(`[release] building Tday v${next}`);
 execSync('pnpm --filter @tday/desktop build', { stdio: 'inherit', cwd: root });
 execSync('pnpm --filter @tday/desktop package:mac', { stdio: 'inherit', cwd: root });

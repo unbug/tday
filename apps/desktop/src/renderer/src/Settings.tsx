@@ -291,7 +291,7 @@ export function Settings({ open, onClose, onSaved }: Props) {
                     ) : null}
                   </button>
                 ))}
-                <details className="mt-2">
+                <details open className="mt-2">
                   <summary className="cursor-pointer rounded-md px-2 py-2 text-xs text-fuchsia-300 hover:bg-zinc-900">
                     + Add provider
                   </summary>

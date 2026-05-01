@@ -66,7 +66,7 @@ export function Terminal({ tabId, agentId, cwd, active }: Props) {
         const msg = err instanceof Error ? err.message : String(err);
         term.writeln(`\x1b[31mfailed to spawn:\x1b[0m ${msg}`);
         term.writeln(
-          `\x1b[2mset ~/.tday/agents.json → { "agents": { "${agentId}": { "bin": "/absolute/path/to/${agentId === 'claude-code' ? 'claude' : agentId}" } } }\x1b[0m`,
+          `\x1b[2mset ~/.tday/agents.json → { "agents": { "${agentId}": { "bin": "/absolute/path/to/${agentId === 'claude-code' ? 'claude' : agentId === 'copilot' ? 'copilot' : agentId}" } } }\x1b[0m`,
         );
       });
 

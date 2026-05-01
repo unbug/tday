@@ -7,6 +7,7 @@ export type AgentId =
   | 'pi'
   | 'claude-code'
   | 'codex'
+  | 'copilot'
   | 'opencode'
   | 'gemini'
   | 'qwen-code'
@@ -42,6 +43,12 @@ export type ProviderKind =
   | 'lmstudio'
   | 'vercel-ai-gateway'
   | 'litellm'
+  | 'nvidia'
+  | 'huggingface'
+  | 'perplexity'
+  | 'bedrock'
+  | 'sglang'
+  | 'vllm'
   | 'custom';
 
 /**

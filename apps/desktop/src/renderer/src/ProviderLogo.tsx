@@ -231,6 +231,54 @@ export function ProviderLogo({ kind, size = 18, className }: Props) {
           />
         </svg>
       );
+    case 'nvidia':
+      return (
+        <svg {...common}>
+          <rect x="2" y="2" width="20" height="20" rx="3" fill="#76b900" />
+          <path d="M5 10 V16 M5 10 Q5 7 8 7 Q11 7 11 10 V16 M11 10 V16" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+          <path d="M13 7 H19 V10 H13 V13 H19 V16 H13" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+        </svg>
+      );
+    case 'huggingface':
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="9" fill="#ff9d00" />
+          <circle cx="9" cy="10" r="1.2" fill="#fff" />
+          <circle cx="15" cy="10" r="1.2" fill="#fff" />
+          <path d="M9 14 Q12 17 15 14" stroke="#fff" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+        </svg>
+      );
+    case 'perplexity':
+      return (
+        <svg {...common}>
+          <rect x="3" y="3" width="18" height="18" rx="4" fill="#1f1f2f" />
+          <path d="M7 8 L12 12 L17 8 M12 12 V16 M7 16 H17" stroke="#20c7b0" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+        </svg>
+      );
+    case 'bedrock':
+      return (
+        <svg {...common}>
+          <rect x="3" y="3" width="18" height="18" rx="4" fill="#232f3e" />
+          <path d="M12 6 L18 10 V14 L12 18 L6 14 V10 Z" stroke="#ff9900" strokeWidth="1.5" fill="none" />
+          <circle cx="12" cy="12" r="2" fill="#ff9900" />
+        </svg>
+      );
+    case 'sglang':
+      return (
+        <svg {...common}>
+          <rect x="3" y="5" width="18" height="12" rx="2" stroke="#6366f1" strokeWidth="1.5" />
+          <path d="M9 20 H15 M12 17 V20" stroke="#6366f1" strokeWidth="1.5" strokeLinecap="round" />
+          <path d="M7 9 L12 12 L17 9 M12 12 V15" stroke="#6366f1" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case 'vllm':
+      return (
+        <svg {...common}>
+          <rect x="3" y="5" width="18" height="12" rx="2" stroke="#ec4899" strokeWidth="1.5" />
+          <path d="M9 20 H15 M12 17 V20" stroke="#ec4899" strokeWidth="1.5" strokeLinecap="round" />
+          <path d="M7 9 L12 15 L17 9" stroke="#ec4899" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
     case 'custom':
     default:
       return (

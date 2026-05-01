@@ -1,0 +1,97 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "tday: release-now",
+			"type": "shell",
+			"command": "/bin/zsh",
+			"args": [
+				"-lc",
+				"cd /Users/unbug/Workspace/tday && node scripts/release.mjs > apps/desktop/build.log 2>&1; echo EXIT:$? >> apps/desktop/build.log"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		},
+		{
+			"label": "tday: release",
+			"type": "shell",
+			"command": "/bin/zsh",
+			"args": [
+				"/tmp/tday-package-0.1.14.sh"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		},
+		{
+			"label": "tday: typecheck",
+			"type": "shell",
+			"command": "pnpm --filter @tday/desktop typecheck",
+			"isBackground": false,
+			"problemMatcher": [
+				"$tsc"
+			]
+		},
+		{
+			"label": "tday: deepseek-api-test",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"/Users/unbug/Workspace/tday/apps/desktop/gateway-test-cjs.cjs"
+			],
+			"options": {
+				"cwd": "/Users/unbug/Workspace/tday"
+			}
+		},
+		{
+			"label": "tday: gateway-test-2",
+			"type": "shell",
+			"command": "/bin/zsh",
+			"args": [
+				"-lc",
+				"cd /Users/unbug/Workspace/tday && node apps/desktop/gateway-test.mjs 2>&1 | tee apps/desktop/gateway-test.log; echo EXIT:$? | tee -a apps/desktop/gateway-test.log"
+			]
+		},
+		{
+			"label": "tday: gateway-test-3",
+			"type": "shell",
+			"command": "/bin/zsh",
+			"args": [
+				"-lc",
+				"cd /Users/unbug/Workspace/tday && node apps/desktop/gateway-test.mjs > /tmp/gw-test.log 2>&1 && echo 'OK' >> /tmp/gw-test.log || echo 'FAIL' >> /tmp/gw-test.log"
+			]
+		},
+		{
+			"label": "tday: canary",
+			"type": "shell",
+			"command": "/bin/zsh",
+			"args": [
+				"-lc",
+				"printf 'HELLO_TEST\\n' > /Users/unbug/Workspace/tday/apps/desktop/canary.log"
+			]
+		},
+		{
+			"label": "tday: touch-test",
+			"type": "shell",
+			"command": "/usr/bin/touch",
+			"args": [
+				"/tmp/copilot-task-test.txt"
+			]
+		},
+		{
+			"label": "tday: env-touch",
+			"type": "shell",
+			"command": "/usr/bin/touch",
+			"args": [
+				"/tmp/tday-env-check.txt"
+			]
+		}
+	]
+}
