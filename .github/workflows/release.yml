@@ -121,7 +121,7 @@ jobs:
           # On a tag push, github.ref_name is the tag (e.g. v0.1.24).
           # On a manual dispatch there is no tag, so fall back to a placeholder.
           tag_name: "${{ github.ref_type == 'tag' && github.ref_name || format('v0.0.0-manual-{0}', github.run_number) }}"
-          name: "${{ github.ref_type == 'tag' && github.ref_name || format('Manual build \#{0}', github.run_number) }}"
+          name: "${{ github.ref_type == 'tag' && github.ref_name || format('Manual build #{0}', github.run_number) }}"
           # Tag-push builds are published immediately; manual ones stay as drafts.
           draft: ${{ github.event_name == 'workflow_dispatch' }}
           generate_release_notes: true
