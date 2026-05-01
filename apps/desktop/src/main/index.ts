@@ -1,8 +1,8 @@
-import { app, BrowserWindow, ipcMain, shell, dialog, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, dialog, Menu, powerSaveBlocker } from 'electron';
 import { isAbsolute, join } from 'node:path';
 import { electronApp, optimizer, is } from '@electron-toolkit/utils';
 import { spawn as spawnPty, type IPty } from 'node-pty';
-import { spawn as spawnChild, execFileSync } from 'node:child_process';
+import { spawn as spawnChild, execFileSync, exec as execAsync } from 'node:child_process';
 import {
   readFileSync,
   existsSync,
@@ -791,6 +791,22 @@ function registerIpc(): void {
   ipcMain.handle(IPC.usageQuery, (_e, filter: UsageFilter = {}) =>
     queryUsage(filter),
   );
+
+  // ── Power management ───────────────────────────────────────────────────────
+  ipcMain.handle(IPC.powerBlockerStart, () => {
+    // Prevent system sleep but allow the display to sleep.
+    const id = powerSaveBlocker.start('prevent-system-sleep');
+    // On macOS immediately dim the display via pmset.
+    if (process.platform === 'darwin') {
+      execAsync('pmset displaysleepnow', () => { /* ignore errors */ });
+    }
+    return { id };
+  });
+  ipcMain.handle(IPC.powerBlockerStop, (_e, id: number) => {
+    if (typeof id === 'number' && powerSaveBlocker.isStarted(id)) {
+      powerSaveBlocker.stop(id);
+    }
+  });
 }
 
 type NpmAction = 'install' | 'update' | 'uninstall';

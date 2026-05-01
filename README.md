@@ -178,6 +178,8 @@ A **Tab** owns one **Session** = one PTY process bound to one agent adapter, one
 | **v0.4.0** 🔄 | Local-inference autodetect | TypeScript probe system (Ollama `/api/tags`, LM Studio `/v1/models`, vLLM, llama.cpp). Scan button + discovered-model chips in Settings. Usage analytics backend (SQLite-based pricing + store). mDNS & Rust scanner remaining. |
 | **v0.5.0** | Token usage analytics | Dashboard UI — stacked-area charts, per-agent/provider/model breakdown. Cost estimation with live pricing table. Export CSV/JSON. Adapter `parseUsage()` hooks. |
 | **v0.6.0** | MCP Management | MCP server registry in Settings (add/edit/remove, stdio & SSE transports). Auto-discover running local MCP processes. Per-agent MCP binding. Bundled quick-add servers: filesystem, memory, fetch, git. |
+| **v0.6.1** | Channels Management | Named I/O channels in Settings: pipe agent stdout to files, webhooks, or other agents. Fan-out (broadcast one agent’s output to multiple sinks). Fan-in (merge streams from multiple agents into one tab). Channel editor with live preview. |
+| **v0.6.2** | Custom Agents | `AgentAdapter` public package. Register third-party agents via manifest URL or local path. Agents tab shows community adapters with one-click install. Custom system-prompt per agent. |
 | **v0.7.0** | Browser & Computer Use | `browser-use` agent adapter (Python). Playwright MCP server quick-add. Anthropic computer-use mode toggle (bash / screenshot / text-editor tools). Screenshot side-panel in tab. |
 | **v0.8.0** | Web Search & Web Tools | Search provider settings (Brave, Tavily, Jina, Perplexity). One-click MCP server install for each. Per-agent search-enable toggle. Web page reader / URL fetcher as shared tool. |
 | **v0.9.0** | Skills & Custom Instructions | Per-agent, per-project skill files (`AGENTS.md`, `SKILL.md`, `.instructions.md`). Global skills library in Settings. Skill injection at spawn time. Skill marketplace (import from URL / GitHub). |
@@ -294,6 +296,32 @@ MCP (Model Context Protocol) lets agents use tools, access resources, and receiv
   - [ ] `@modelcontextprotocol/server-git` — Git log / diff / blame
 - [ ] Inject `--mcp-config <json>` into Claude Code / `opencode` / `gemini` at spawn time
 - [ ] MCP server log viewer inside the app
+
+### v0.6.1 — Channels Management
+Named I/O channels let you wire agent outputs to external sinks or other agents — turning Tday into a lightweight multi-agent orchestrator.
+
+- [ ] **Settings → Channels** tab
+  - [ ] Create / edit / delete named channel definitions
+  - [ ] Channel types: `file` (append to log), `webhook` (HTTP POST), `agent` (pipe to another tab)
+  - [ ] Per-channel filter: regex / glob on stdout lines
+  - [ ] Channel enable/disable toggle
+- [ ] **Fan-out** — one agent’s output broadcast to multiple sinks simultaneously
+- [ ] **Fan-in** — merge stdout from multiple agents/tabs into a single virtual tab
+- [ ] **Live channel inspector** — real-time stream preview in a side panel
+- [ ] Per-tab channel binding (drag-and-drop tab onto channel)
+- [ ] Persist channel config to `~/.tday/channels.json`
+
+### v0.6.2 — Custom Agents
+Make `AgentAdapter` a public package so the community can ship their own agent integrations.
+
+- [ ] Publish `@tday/adapter-sdk` (TypeScript types + test harness)
+- [ ] Agent manifest format (`tday-adapter.json`): id, displayName, detect, launch, parseUsage
+- [ ] **Settings → Agents** → “Community adapters” section
+  - [ ] Install from npm package name
+  - [ ] Install from local path / manifest URL
+  - [ ] Update / remove installed community adapters
+- [ ] Custom system-prompt per agent (injected before every session)
+- [ ] Adapter sandbox: run with `--no-asar` + restricted IPC subset
 
 ### v0.7.0 — Browser & Computer Use
 Bring browser-automation and computer-use capabilities into Tday as first-class citizens — configure them once, launch them like any other agent tab.

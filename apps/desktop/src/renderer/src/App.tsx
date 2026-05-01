@@ -112,6 +112,7 @@ export default function App() {
   const [installStatus, setInstallStatus] = useState('starting');
   const [installLog, setInstallLog] = useState<string>('');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [keepAwakeId, setKeepAwakeId] = useState<number | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [agentList, setAgentList] = useState<AgentInfo[]>([]);
   const [showAgentMenu, setShowAgentMenu] = useState(false);
@@ -434,6 +435,37 @@ export default function App() {
             ) : null}
           </div>
         </div>
+        {/* Keep-awake: dim screen but block system sleep */}
+        <button
+          onClick={async () => {
+            if (keepAwakeId !== null) {
+              await window.tday.powerBlockerStop(keepAwakeId);
+              setKeepAwakeId(null);
+            } else {
+              const { id } = await window.tday.powerBlockerStart();
+              setKeepAwakeId(id);
+            }
+          }}
+          className={`no-drag ml-1 rounded-md px-2 py-1 transition-colors ${
+            keepAwakeId !== null
+              ? 'text-amber-400 hover:bg-zinc-900'
+              : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100'
+          }`}
+          title={keepAwakeId !== null ? 'Keep-awake active — click to disable' : 'Dim screen, keep system awake'}
+          aria-label="Toggle keep-awake"
+        >
+          {keepAwakeId !== null ? (
+            // Moon icon — active state
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z" />
+            </svg>
+          ) : (
+            // Moon icon — inactive
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z" />
+            </svg>
+          )}
+        </button>
         <button
           onClick={() => setSettingsOpen(true)}
           className="no-drag ml-1 rounded-md px-2 py-1 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"

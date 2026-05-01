@@ -67,6 +67,11 @@ const api = {
     ipcRenderer.invoke(IPC.usageAppend, record) as Promise<void>,
   queryUsage: (filter: UsageFilter = {}) =>
     ipcRenderer.invoke(IPC.usageQuery, filter) as Promise<UsageSummary>,
+  // ── Power management ────────────────────────────────────────────────────────
+  powerBlockerStart: () =>
+    ipcRenderer.invoke(IPC.powerBlockerStart) as Promise<{ id: number }>,
+  powerBlockerStop: (id: number) =>
+    ipcRenderer.invoke(IPC.powerBlockerStop, id) as Promise<void>,
 };
 
 contextBridge.exposeInMainWorld('tday', api);

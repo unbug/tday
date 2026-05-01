@@ -150,6 +150,9 @@ export const IPC = {
   // Token usage statistics
   usageAppend: 'usage:append',
   usageQuery: 'usage:query',
+  // Power management
+  powerBlockerStart: 'power:blocker:start',
+  powerBlockerStop: 'power:blocker:stop',
 } as const;
 
 // ─── Discovery types ──────────────────────────────────────────────────────────
