@@ -1,6 +1,6 @@
 {
   "name": "@tday/adapter-pi",
-  "version": "0.1.32",
+  "version": "0.1.33",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
