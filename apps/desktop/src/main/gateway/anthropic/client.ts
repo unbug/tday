@@ -55,3 +55,61 @@ export function parseAnthropicSseEvents(text: string): AStreamEvent[] {
   flush(); // handle any trailing block without trailing empty line
   return events;
 }
+
+/**
+ * Incremental SSE parser for real-time streaming.
+ * Feed raw text chunks via `push()`; each call returns any complete events
+ * that could be parsed from the data received so far.
+ * Call `end()` when the stream closes to flush any remaining buffered data.
+ */
+export class SseParser {
+  private buf = '';
+  private eventType = '';
+  private dataLines: string[] = [];
+
+  push(chunk: string): AStreamEvent[] {
+    this.buf += chunk;
+    const events: AStreamEvent[] = [];
+    const lines = this.buf.split('\n');
+    // The last element may be an incomplete line — keep it in the buffer.
+    this.buf = lines.pop() ?? '';
+    for (const line of lines) {
+      if (line === '') {
+        const ev = this.flushBlock();
+        if (ev) events.push(ev);
+        continue;
+      }
+      if (line.startsWith('event:')) { this.eventType = line.slice(6).trim(); continue; }
+      if (line.startsWith('data:')) this.dataLines.push(line.slice(5).trim());
+    }
+    return events;
+  }
+
+  /** Flush any data remaining after the stream has closed. */
+  end(): AStreamEvent[] {
+    const events: AStreamEvent[] = [];
+    if (this.buf) {
+      const line = this.buf;
+      this.buf = '';
+      if (line.startsWith('data:')) this.dataLines.push(line.slice(5).trim());
+    }
+    const ev = this.flushBlock();
+    if (ev) events.push(ev);
+    return events;
+  }
+
+  private flushBlock(): AStreamEvent | null {
+    if (!this.dataLines.length) { this.eventType = ''; return null; }
+    const json = this.dataLines.join('\n');
+    this.dataLines = [];
+    const eventType = this.eventType;
+    this.eventType = '';
+    try {
+      const e = JSON.parse(json) as AStreamEvent;
+      if (!e.type && eventType) e.type = eventType;
+      return e;
+    } catch {
+      return null;
+    }
+  }
+}

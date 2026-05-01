@@ -8,7 +8,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { ProviderProfile } from '@tday/shared';
 import type { Obj, GatewayAdapter, GatewayAdapterContext, GatewayResolution } from './types.js';
 import type { AMessage, ARequest } from './anthropic/types.js';
-import { callAnthropic, parseAnthropicSseEvents } from './anthropic/client.js';
+import { callAnthropic, SseParser } from './anthropic/client.js';
 import type { AResponse } from './anthropic/types.js';
 import { baseResponse } from './openai/types.js';
 import { ThinkingState } from './deepseek/state.js';
@@ -26,6 +26,10 @@ export function sendJson(res: ServerResponse, status: number, body: Obj): void {
 
 export function writeSse(res: ServerResponse, event: string, data: Obj): void {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  // Flush the kernel socket buffer immediately so each SSE event is delivered
+  // to the client as soon as it is written, rather than being batched by the
+  // TCP Nagle algorithm or Node.js's internal write queue.
+  (res.socket as { flush?: () => void } | null)?.flush?.();
 }
 
 export function readRequestJson(req: IncomingMessage): Promise<Obj> {
@@ -208,30 +212,66 @@ export class CodexDeepSeekAnthropicAdapter implements GatewayAdapter {
     }
 
     // ── Streaming ──────────────────────────────────────────────────────────
+    // Disable Nagle's algorithm so each SSE chunk is sent immediately without
+    // waiting to be coalesced with subsequent writes.
+    res.socket?.setNoDelay(true);
     res.writeHead(200, {
       'content-type': 'text/event-stream',
       'cache-control': 'no-cache',
       connection: 'keep-alive',
     });
+    // Flush the 200 + headers to the client right away.  Without this the
+    // headers stay in Node.js's internal buffer until the first res.write(),
+    // delaying stream start on the Codex side.
+    res.flushHeaders();
 
     const converter = new AnthropicStreamConverter(responseId, body.model, thinkingState, hasToolHistory);
+    const parser = new SseParser();
     const decoder = new TextDecoder();
-    let buf = '';
-    let rawBody = '';
+
+    /**
+     * Forward converted SSE events to the client, one character at a time.
+     *
+     * Two levels of pacing:
+     *
+     * 1. **Character-level** — `response.output_text.delta` events are split
+     *    into individual Unicode codepoints, each written in its own socket
+     *    write with a `setImmediate` yield between them.  DeepSeek often packs
+     *    several tokens into a single `text_delta` SSE event; without this
+     *    split, Codex would receive a multi-character burst rather than the
+     *    character-by-character trickle that creates the "streaming" feel.
+     *
+     * 2. **Event-level** — when an upstream TCP packet carries multiple
+     *    Anthropic SSE events, a `setImmediate` yield between consecutive
+     *    events ensures each gets its own libuv `write()` call (and therefore
+     *    its own TCP segment, given `setNoDelay(true)`).
+     */
+    const emitEvents = async (events: ReturnType<typeof parser.push>) => {
+      for (let i = 0; i < events.length; i++) {
+        for (const { event: evName, data } of converter.processEvent(events[i])) {
+          if (evName === 'response.output_text.delta') {
+            // Spread into Unicode codepoints so multi-byte / emoji chars are
+            // kept whole while we still iterate character-by-character.
+            const chars = [...((data as { delta?: string }).delta ?? '')];
+            for (let c = 0; c < chars.length; c++) {
+              writeSse(res, evName, { ...(data as Obj), delta: chars[c] });
+              if (c < chars.length - 1) await new Promise<void>((r) => setImmediate(r));
+            }
+          } else {
+            writeSse(res, evName, data);
+          }
+        }
+        if (i < events.length - 1) {
+          await new Promise<void>((r) => setImmediate(r));
+        }
+      }
+    };
 
     for await (const chunk of upstream.body as AsyncIterable<Uint8Array>) {
-      buf += decoder.decode(chunk, { stream: true });
-      const lines = buf.split('\n');
-      buf = lines.pop() ?? '';
-      for (const line of lines) rawBody += line + '\n';
+      await emitEvents(parser.push(decoder.decode(chunk, { stream: true })));
     }
-    if (buf) rawBody += buf + '\n';
-
-    for (const event of parseAnthropicSseEvents(rawBody)) {
-      for (const { event: evName, data } of converter.processEvent(event)) {
-        writeSse(res, evName, data);
-      }
-    }
+    // Flush any data remaining after the stream closes
+    await emitEvents(parser.end());
 
     const { output, outputText, completedReasoningText } = converter.finish();
     writeSse(res, 'response.completed', {
