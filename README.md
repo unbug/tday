@@ -28,60 +28,6 @@
   />
 </p>
 
-
----
-## Supported Harness Agents
-
-| Agent | Install | Session Resume | Conversation History |
-|---|---|---|---|
-| **Pi** (`pi`) | `npm i -g @mariozechner/pi-coding-agent` | — | — |
-| **Claude Code** (`claude-code`) | `npm i -g @anthropic-ai/claude-code` | `--resume <uuid>` | ✅ `~/.claude/projects/` |
-| **Codex** (`codex`) | `npm i -g @openai/codex` | `codex resume <uuid>` | ✅ `~/.codex/sessions/` |
-| **Copilot CLI** (`copilot`) | `npm i -g @github/copilot-cli` | — | — |
-| **OpenCode** (`opencode`) | `npm i -g opencode-ai` | `--session <id>` | ✅ SQLite `~/.local/share/opencode/` |
-| **Gemini** (`gemini`) | `npm i -g @google/gemini-cli` | — | — |
-| **Qwen Code** (`qwen-code`) | `npm i -g qwen-code` | — | — |
-| **Crush** (`crush`) | `npm i -g crush-cli` | — | — |
-| **Hermes** (`hermes`) | `npm i -g hermes-agent` | — | — |
-
-> Agents with ✅ **Conversation History** show previous turns in the terminal on restore, and re-launch the agent with its own `--resume` / `--session` flag so you continue the same conversation context.
-
----
-## Supported Model Providers
-
-| Provider | API Style | Notes |
-|---|---|---|
-| **DeepSeek** | OpenAI · Anthropic | DeepSeek V4 Pro / V4 Flash (Apr 2026), DeepSeek V3.2 via in-process Anthropic gateway |
-| **OpenAI** | OpenAI | GPT-5.5, GPT-5.5 Pro, GPT-5.4, GPT-5.4-mini, GPT-5.4-nano |
-| **Anthropic** | Anthropic | Claude Opus 4.7, Claude Sonnet 4.6, Claude Sonnet 4.5, Claude Haiku 4.5 |
-| **Google Gemini** | OpenAI | Gemini 2.5 Pro / Flash (stable); Gemini 3.1 Pro / 3 Flash (preview) |
-| **xAI (Grok)** | OpenAI | Grok-4.3, Grok-4.20 (reasoning / non-reasoning) |
-| **Groq** | OpenAI | Llama 4 Scout / Maverick, Llama 3.3-70B via Groq LPU |
-| **Mistral** | OpenAI | Mistral Large 3, Codestral 2501, Mistral Small 3.1 |
-| **Moonshot (Kimi)** | OpenAI · Anthropic | Kimi k2, Kimi-VL-A3B |
-| **Cerebras** | OpenAI | Llama on Cerebras WSE |
-| **Together AI** | OpenAI | 200+ open models |
-| **Fireworks AI** | OpenAI | Fast open-model inference |
-| **Z.AI** | OpenAI · Anthropic | GLM-4 series |
-| **Qwen (Alibaba)** | OpenAI | Qwen3.6-Max-Preview, Qwen3.6-Plus, Qwen3-Coder-480B-A35B |
-| **Volcengine (Doubao)** | OpenAI | Doubao-1.5-Pro, Doubao-Pro-32K |
-| **MiniMax** | OpenAI | MiniMax-Text-01, MiniMax-M1 |
-| **StepFun** | OpenAI | Step-3, Step-2-16K |
-| **OpenRouter** | OpenAI | Unified gateway to 300+ models |
-| **NVIDIA NIM** | OpenAI | Llama 4, Qwen3.6, Mistral on NVIDIA NIM |
-| **Hugging Face** | OpenAI | Serverless inference API |
-| **Perplexity** | OpenAI | Sonar Pro, Sonar Reasoning Pro |
-| **Amazon Bedrock** | Anthropic | Claude, Llama, Mistral via Bedrock |
-| **SGLang** | OpenAI | Self-hosted high-throughput server |
-| **vLLM** | OpenAI | Self-hosted PagedAttention server |
-| **Ollama** | OpenAI | Local models (auto-detected on LAN) |
-| **LM Studio** | OpenAI | Local GUI inference server (auto-detected) |
-| **Vercel AI Gateway** | OpenAI | Vercel-hosted unified gateway |
-| **LiteLLM** | OpenAI | Self-hosted proxy for 100+ models |
-| **Custom** | OpenAI · Anthropic | Any OpenAI-compatible or Anthropic-compatible endpoint |
-
-> **Local-inference auto-discovery** — Tday scans `localhost` and your LAN for running Ollama, LM Studio, vLLM, llama.cpp, SGLang, and LocalAI instances and surfaces them as providers automatically (Settings → Scan).
-
 ---
 ## Installation
 
@@ -550,7 +496,60 @@ git push origin v0.1.12
 5. **Don’t hide the terminal.** It’s a terminal. Keystrokes, escape codes, colors, mouse — all forwarded faithfully.
 
 ---
+## 9. Supported Harness Agents
 
-## 9. License
+| Agent | Install | Session Resume | Conversation History |
+|---|---|---|---|
+| **Pi** (`pi`) | `npm i -g @mariozechner/pi-coding-agent` | — | — |
+| **Claude Code** (`claude-code`) | `npm i -g @anthropic-ai/claude-code` | `--resume <uuid>` | ✅ `~/.claude/projects/` |
+| **Codex** (`codex`) | `npm i -g @openai/codex` | `codex resume <uuid>` | ✅ `~/.codex/sessions/` |
+| **Copilot CLI** (`copilot`) | `npm i -g @github/copilot-cli` | — | — |
+| **OpenCode** (`opencode`) | `npm i -g opencode-ai` | `--session <id>` | ✅ SQLite `~/.local/share/opencode/` |
+| **Gemini** (`gemini`) | `npm i -g @google/gemini-cli` | — | — |
+| **Qwen Code** (`qwen-code`) | `npm i -g qwen-code` | — | — |
+| **Crush** (`crush`) | `npm i -g crush-cli` | — | — |
+| **Hermes** (`hermes`) | `npm i -g hermes-agent` | — | — |
+
+> Agents with ✅ **Conversation History** show previous turns in the terminal on restore, and re-launch the agent with its own `--resume` / `--session` flag so you continue the same conversation context.
+
+---
+## 10. Supported Model Providers
+
+| Provider | API Style | Notes |
+|---|---|---|
+| **DeepSeek** | OpenAI · Anthropic | DeepSeek V4 Pro / V4 Flash (Apr 2026), DeepSeek V3.2 via in-process Anthropic gateway |
+| **OpenAI** | OpenAI | GPT-5.5, GPT-5.5 Pro, GPT-5.4, GPT-5.4-mini, GPT-5.4-nano |
+| **Anthropic** | Anthropic | Claude Opus 4.7, Claude Sonnet 4.6, Claude Sonnet 4.5, Claude Haiku 4.5 |
+| **Google Gemini** | OpenAI | Gemini 2.5 Pro / Flash (stable); Gemini 3.1 Pro / 3 Flash (preview) |
+| **xAI (Grok)** | OpenAI | Grok-4.3, Grok-4.20 (reasoning / non-reasoning) |
+| **Groq** | OpenAI | Llama 4 Scout / Maverick, Llama 3.3-70B via Groq LPU |
+| **Mistral** | OpenAI | Mistral Large 3, Codestral 2501, Mistral Small 3.1 |
+| **Moonshot (Kimi)** | OpenAI · Anthropic | Kimi k2, Kimi-VL-A3B |
+| **Cerebras** | OpenAI | Llama on Cerebras WSE |
+| **Together AI** | OpenAI | 200+ open models |
+| **Fireworks AI** | OpenAI | Fast open-model inference |
+| **Z.AI** | OpenAI · Anthropic | GLM-4 series |
+| **Qwen (Alibaba)** | OpenAI | Qwen3.6-Max-Preview, Qwen3.6-Plus, Qwen3-Coder-480B-A35B |
+| **Volcengine (Doubao)** | OpenAI | Doubao-1.5-Pro, Doubao-Pro-32K |
+| **MiniMax** | OpenAI | MiniMax-Text-01, MiniMax-M1 |
+| **StepFun** | OpenAI | Step-3, Step-2-16K |
+| **OpenRouter** | OpenAI | Unified gateway to 300+ models |
+| **NVIDIA NIM** | OpenAI | Llama 4, Qwen3.6, Mistral on NVIDIA NIM |
+| **Hugging Face** | OpenAI | Serverless inference API |
+| **Perplexity** | OpenAI | Sonar Pro, Sonar Reasoning Pro |
+| **Amazon Bedrock** | Anthropic | Claude, Llama, Mistral via Bedrock |
+| **SGLang** | OpenAI | Self-hosted high-throughput server |
+| **vLLM** | OpenAI | Self-hosted PagedAttention server |
+| **Ollama** | OpenAI | Local models (auto-detected on LAN) |
+| **LM Studio** | OpenAI | Local GUI inference server (auto-detected) |
+| **Vercel AI Gateway** | OpenAI | Vercel-hosted unified gateway |
+| **LiteLLM** | OpenAI | Self-hosted proxy for 100+ models |
+| **Custom** | OpenAI · Anthropic | Any OpenAI-compatible or Anthropic-compatible endpoint |
+
+> **Local-inference auto-discovery** — Tday scans `localhost` and your LAN for running Ollama, LM Studio, vLLM, llama.cpp, SGLang, and LocalAI instances and surfaces them as providers automatically (Settings → Scan).
+
+---
+
+## 11. License
 
 MIT License
