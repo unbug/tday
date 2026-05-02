@@ -17,13 +17,14 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onSaved?: () => void;
+  initialSection?: Section;
 }
 
 type Section = 'providers' | 'agents' | 'usage';
 type UsageDateMode = 'today' | '7d' | '30d' | '90d' | 'custom';
 
-export function Settings({ open, onClose, onSaved }: Props) {
-  const [section, setSection] = useState<Section>('providers');
+export function Settings({ open, onClose, onSaved, initialSection }: Props) {
+  const [section, setSection] = useState<Section>(initialSection ?? 'providers');
   const [cfg, setCfg] = useState<ProvidersConfig | null>(null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [activeId, setActiveId] = useState<string>('');
@@ -39,6 +40,11 @@ export function Settings({ open, onClose, onSaved }: Props) {
   const [usageAgentId, setUsageAgentId] = useState('');
   // Ref for debounced probe timer — must be declared before any early return
   const probeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Jump to initialSection when it changes (e.g. opened from Usage shortcut)
+  useEffect(() => {
+    if (open && initialSection) setSection(initialSection);
+  }, [open, initialSection]);
+
   const scheduleProbe = useCallback((id: string, url: string) => {
     if (probeTimer.current) clearTimeout(probeTimer.current);
     if (!url.trim()) return;
@@ -335,12 +341,6 @@ export function Settings({ open, onClose, onSaved }: Props) {
               </SectionTab>
             </div>
             <div className="flex items-center gap-3">
-              <span
-                className="select-text rounded bg-zinc-800/60 px-2 py-0.5 font-mono text-[10px] text-zinc-400"
-                title="Tday version"
-              >
-                v{__APP_VERSION__}
-              </span>
               <button
                 className="rounded-md px-2 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
                 onClick={onClose}
@@ -854,7 +854,9 @@ export function Settings({ open, onClose, onSaved }: Props) {
                             </tr>
                           </thead>
                           <tbody>
-                            {Object.entries(usageData.byModel).map(([model, m]) => (
+                            {Object.entries(usageData.byModel)
+                              .sort(([, a], [, b]) => (b.inputTokens + b.outputTokens) - (a.inputTokens + a.outputTokens) || b.requests - a.requests)
+                              .map(([model, m]) => (
                               <tr
                                 key={model}
                                 className="border-b border-zinc-800/40 last:border-0 hover:bg-zinc-900/40"
@@ -897,7 +899,9 @@ export function Settings({ open, onClose, onSaved }: Props) {
                             </tr>
                           </thead>
                           <tbody>
-                            {Object.entries(usageData.byAgent).map(([agId, ag]) => (
+                            {Object.entries(usageData.byAgent)
+                              .sort(([, a], [, b]) => (b.inputTokens + b.outputTokens) - (a.inputTokens + a.outputTokens) || b.requests - a.requests)
+                              .map(([agId, ag]) => (
                               <tr
                                 key={agId}
                                 className="border-b border-zinc-800/40 last:border-0 hover:bg-zinc-900/40"

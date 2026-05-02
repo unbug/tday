@@ -86,6 +86,41 @@ export interface SpawnRequest {
   cwd?: string;
   cols: number;
   rows: number;
+  /**
+   * Agent-native session identifier for conversation resumption.
+   * How it's used depends on the agent:
+   *   claude-code  →  `claude --resume <id>`
+   *   codex        →  `codex resume <id>` (subcommand)
+   *   opencode     →  `opencode --session <id>`
+   */
+  agentSessionId?: string;
+}
+
+/**
+ * A single turn in a restored agent conversation.
+ * Returned by `readAgentSession` — tool calls, reasoning and system messages
+ * are stripped; only human-readable turns are included.
+ */
+export interface SessionMessage {
+  role: 'user' | 'assistant';
+  /** Plain text (tool calls / thinking stripped). */
+  text: string;
+}
+
+/**
+ * A record of a closed tab, persisted to ~/.tday/tab-history.json.
+ * Agent conversation history is NOT duplicated here — we only store
+ * the session ID so we can pass it to the agent's resume flag.
+ */
+export interface TabHistoryEntry {
+  /** Unique history record ID (for deletion). */
+  histId: string;
+  title: string;
+  agentId: AgentId;
+  cwd: string;
+  closedAt: number;
+  /** Agent-native session ID (UUID or similar). Null when unsupported. */
+  agentSessionId?: string;
 }
 
 /** Per-agent persisted settings. */
@@ -153,6 +188,12 @@ export const IPC = {
   // Power management
   powerBlockerStart: 'power:blocker:start',
   powerBlockerStop: 'power:blocker:stop',
+  // Tab history (closed tabs, restore-session)
+  tabHistoryList: 'tab-history:list',
+  tabHistoryPush: 'tab-history:push',
+  tabHistoryDelete: 'tab-history:delete',
+  latestAgentSession: 'tab-history:latest-session',
+  readAgentSession: 'tab-history:read-session',
 } as const;
 
 // ─── Discovery types ──────────────────────────────────────────────────────────

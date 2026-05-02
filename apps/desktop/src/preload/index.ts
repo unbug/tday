@@ -14,9 +14,12 @@ import {
   type UsageRecord,
   type UsageFilter,
   type UsageSummary,
+  type TabHistoryEntry,
+  type SessionMessage,
 } from '@tday/shared';
 
 const api = {
+  platform: process.platform,
   homeDir: () => ipcRenderer.invoke(IPC.homeDir) as Promise<string>,
   pickDir: (defaultPath?: string) =>
     ipcRenderer.invoke(IPC.pickDir, defaultPath) as Promise<string | null>,
@@ -57,6 +60,11 @@ const api = {
     ipcRenderer.on('tab:close', fn);
     return () => ipcRenderer.off('tab:close', fn);
   },
+  onTabRestore: (cb: () => void) => {
+    const fn = () => cb();
+    ipcRenderer.on('tab:restore', fn);
+    return () => ipcRenderer.off('tab:restore', fn);
+  },
   // ── Local service discovery ────────────────────────────────────────────────
   discoverServices: (req: DiscoverServicesRequest = {}) =>
     ipcRenderer.invoke(IPC.discoverServices, req) as Promise<DiscoveredService[]>,
@@ -72,6 +80,17 @@ const api = {
     ipcRenderer.invoke(IPC.powerBlockerStart) as Promise<{ id: number }>,
   powerBlockerStop: (id: number) =>
     ipcRenderer.invoke(IPC.powerBlockerStop, id) as Promise<void>,
+  // ── Tab history ─────────────────────────────────────────────────────────────
+  listTabHistory: () =>
+    ipcRenderer.invoke(IPC.tabHistoryList) as Promise<TabHistoryEntry[]>,
+  pushTabHistory: (entry: TabHistoryEntry) =>
+    ipcRenderer.invoke(IPC.tabHistoryPush, entry) as Promise<void>,
+  deleteTabHistory: (histId: string) =>
+    ipcRenderer.invoke(IPC.tabHistoryDelete, histId) as Promise<void>,
+  latestAgentSession: (agentId: AgentId, cwd: string) =>
+    ipcRenderer.invoke(IPC.latestAgentSession, agentId, cwd) as Promise<string | null>,
+  readAgentSession: (agentId: AgentId, sessionId: string, cwd: string) =>
+    ipcRenderer.invoke(IPC.readAgentSession, agentId, sessionId, cwd) as Promise<SessionMessage[]>,
 };
 
 contextBridge.exposeInMainWorld('tday', api);

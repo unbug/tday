@@ -11,6 +11,7 @@ import {
   readdirSync,
   chmodSync,
   createWriteStream,
+  statSync,
 } from 'node:fs';
 import { homedir, arch as osArch } from 'node:os';
 import { request as httpsRequest } from 'node:https';
@@ -35,6 +36,15 @@ import { probeBaseUrl } from './discovery/probe.js';
 import { appendUsage, loadUsageRecords, computeUsageSummary } from './usage/store.js';
 import { SESSION_FILE_AGENTS } from './usage/session-readers/index.js';
 import { loadCachedSessionRecords, triggerSessionCacheRefresh } from './usage/session-cache.js';
+import {
+  loadHistory,
+  pushHistoryEntry,
+  deleteHistoryEntry,
+  latestAgentSession,
+  readAgentSession,
+  type TabHistoryEntry,
+  type SessionMessage,
+} from './tab-history.js';
 
 const TDAY_DIR = join(homedir(), '.tday');
 const localGatewayManager = createLocalGatewayManager();
@@ -69,12 +79,25 @@ function augmentPath(): void {
       'C:\\Program Files\\nodejs',                   // standard Node.js install
       'C:\\Program Files (x86)\\nodejs',
     );
+    // volta
+    extras.push(join(home, '.volta', 'bin'));
     // fnm: pick the active node version
     try {
       const fnmDir = join(localAppData, 'fnm', 'node-versions');
       if (existsSync(fnmDir)) {
         const versions = readdirSync(fnmDir).sort().reverse();
         if (versions[0]) extras.unshift(join(fnmDir, versions[0], 'installation'));
+      }
+    } catch { /* ignore */ }
+    // nvm-windows: active version via env vars or version dirs
+    try {
+      const nvmHome = process.env.NVM_HOME ?? join(appData, 'nvm');
+      const nvmSymlink = process.env.NVM_SYMLINK;
+      if (nvmSymlink && existsSync(nvmSymlink)) {
+        extras.unshift(nvmSymlink);
+      } else if (existsSync(nvmHome)) {
+        const nvmVersions = readdirSync(nvmHome).filter((v) => /^v?\d/.test(v)).sort().reverse();
+        if (nvmVersions[0]) extras.unshift(join(nvmHome, nvmVersions[0]));
       }
     } catch { /* ignore */ }
   } else {
@@ -99,10 +122,23 @@ function augmentPath(): void {
     } catch { /* ignore */ }
   }
 
-  // npm global prefix detection (cross-platform)
-  const npmCandidates = process.platform === 'win32'
+  // npm global prefix detection: find npm dynamically first, then fall back to
+  // hardcoded candidates. Dynamic discovery handles nvm-windows, volta, fnm, etc.
+  const isWin = process.platform === 'win32';
+  const npmCandidates: string[] = isWin
     ? [join('C:\\Program Files\\nodejs', 'npm.cmd'), join(process.env.APPDATA ?? '', 'npm', 'npm.cmd')]
     : ['/opt/homebrew/bin/npm', '/usr/local/bin/npm'];
+  try {
+    // Use where/which with the inherited PATH (before our augmentation) to find
+    // whatever npm the user's shell normally uses — this works for nvm-windows,
+    // volta, fnm, and any other version manager that writes to PATH.
+    const whichCmd = isWin ? 'where' : 'which';
+    const found = execFileSync(whichCmd, [isWin ? 'npm.cmd' : 'npm'], {
+      encoding: 'utf8',
+      timeout: 3_000,
+    }).split(/\r?\n/)[0].trim();
+    if (found) npmCandidates.unshift(found);
+  } catch { /* npm not on current PATH; fall through to hardcoded candidates */ }
   for (const npmBin of npmCandidates) {
     if (npmBin && existsSync(npmBin)) {
       try {
@@ -111,7 +147,7 @@ function augmentPath(): void {
           timeout: 3_000,
         }).trim();
         if (prefix) {
-          extras.push(process.platform === 'win32' ? prefix : join(prefix, 'bin'));
+          extras.push(isWin ? prefix : join(prefix, 'bin'));
         }
       } catch { /* ignore */ }
       break;
@@ -596,6 +632,7 @@ function createWindow(): void {
   });
 
   win.on('ready-to-show', () => win.show());
+  win.on('close', () => app.quit());
   win.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url);
     return { action: 'deny' };
@@ -748,6 +785,27 @@ function registerIpc(): void {
         gatewayResolution?.baseUrl ?? effectiveProvider?.baseUrl,
       );
       args = [...modelArgs, ...userArgs];
+      // Per-agent session resume — each agent has its own convention:
+      //   claude-code: flag  --resume <uuid>
+      //   codex:       subcommand  resume <uuid>  (replaces model flags)
+      //   opencode:    flag  --session <id>
+      if (req.agentSessionId) {
+        switch (req.agentId) {
+          case 'claude-code':
+            args = ['--resume', req.agentSessionId, ...args];
+            break;
+          case 'codex':
+            // `codex resume <uuid>` is a subcommand; don't pass model flags
+            // (the session already has them).
+            args = ['resume', req.agentSessionId];
+            break;
+          case 'opencode':
+            args = ['--session', req.agentSessionId, ...args];
+            break;
+          default:
+            break;
+        }
+      }
       env = piLike.env;
       if (gatewayResolution?.noProxyHosts?.length) {
         appendNoProxy(env, gatewayResolution.noProxyHosts);
@@ -757,11 +815,12 @@ function registerIpc(): void {
 
     const resolved = resolveExecutable(cmd, env);
     if (!resolved.resolved) {
-      const pathPreview = (env.PATH ?? '').split(':').filter(Boolean).slice(0, 8).join(':');
+      const pathParts = (env.PATH ?? '').split(PATH_SEP).filter(Boolean);
+      const pathPreview = pathParts.slice(0, 8).join(PATH_SEP);
       throw new Error(
         `executable not found: ${resolved.requested}\n` +
           `cwd: ${launchCwd}\n` +
-          `PATH: ${pathPreview}${(env.PATH ?? '').includes(':') ? ':…' : ''}`,
+          `PATH: ${pathPreview}${pathParts.length > 8 ? `${PATH_SEP}…` : ''}`,
       );
     }
 
@@ -871,6 +930,24 @@ function registerIpc(): void {
       powerSaveBlocker.stop(id);
     }
   });
+
+  // ── Tab history ────────────────────────────────────────────────────────────
+  ipcMain.handle(IPC.tabHistoryList, (): TabHistoryEntry[] => loadHistory());
+  ipcMain.handle(IPC.tabHistoryPush, (_e, entry: TabHistoryEntry): void => {
+    pushHistoryEntry(entry);
+  });
+  ipcMain.handle(IPC.tabHistoryDelete, (_e, histId: string): void => {
+    deleteHistoryEntry(histId);
+  });
+  ipcMain.handle(
+    IPC.latestAgentSession,
+    (_e, agentId: AgentId, cwd: string): string | null => latestAgentSession(agentId, cwd),
+  );
+  ipcMain.handle(
+    IPC.readAgentSession,
+    (_e, agentId: AgentId, sessionId: string, cwd: string): SessionMessage[] =>
+      readAgentSession(agentId, sessionId, cwd),
+  );
 }
 
 type NpmAction = 'install' | 'update' | 'uninstall';
@@ -983,7 +1060,7 @@ async function runNpmGlobal(
 
 function installAppMenu(): void {
   const isMac = process.platform === 'darwin';
-  const sendShortcut = (channel: 'tab:new' | 'tab:close') => () => {
+  const sendShortcut = (channel: 'tab:new' | 'tab:close' | 'tab:restore') => () => {
     const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
     win?.webContents.send(channel);
   };
@@ -999,6 +1076,11 @@ function installAppMenu(): void {
         label: 'Close Tab',
         accelerator: 'CommandOrControl+W',
         click: sendShortcut('tab:close'),
+      },
+      {
+        label: 'Restore Closed Tab',
+        accelerator: 'CommandOrControl+Shift+T',
+        click: sendShortcut('tab:restore'),
       },
     ],
   };

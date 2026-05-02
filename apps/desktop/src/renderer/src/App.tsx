@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import type { AgentId, AgentInfo } from '@tday/shared';
+import type { AgentId, AgentInfo, TabHistoryEntry } from '@tday/shared';
 import { Terminal } from './Terminal';
 import { Logo } from './Logo';
 import { Settings } from './Settings';
+import { HistoryPanel } from './HistoryPanel';
 import type { TdayApi } from '../../preload';
 
 declare global {
@@ -26,6 +27,8 @@ interface Tab {
   cwd: string;
   /** What's in the cwd input right now — only commits to `cwd` on Enter/Browse. */
   cwdDraft: string;
+  /** Agent-native session ID (UUID etc.) — used for --resume / --session on restore. */
+  agentSessionId?: string;
 }
 
 let nextId = 1;
@@ -40,24 +43,30 @@ const newTab = (cwd: string, agentId: AgentId = 'pi', title?: string): Tab => ({
 
 function agentTitle(id: AgentId): string {
   switch (id) {
-    case 'pi':
-      return 'Pi';
-    case 'claude-code':
-      return 'Claude';
-    case 'codex':
-      return 'Codex';
-    case 'copilot':
-      return 'Copilot';
-    case 'opencode':
-      return 'OpenCode';
-    case 'gemini':
-      return 'Gemini';
-    case 'qwen-code':
-      return 'Qwen';
-    case 'crush':
-      return 'Crush';
-    case 'hermes':
-      return 'Hermes';
+    case 'pi':        return 'Pi';
+    case 'claude-code': return 'Claude';
+    case 'codex':     return 'Codex';
+    case 'copilot':   return 'Copilot';
+    case 'opencode':  return 'OpenCode';
+    case 'gemini':    return 'Gemini';
+    case 'qwen-code': return 'Qwen';
+    case 'crush':     return 'Crush';
+    case 'hermes':    return 'Hermes';
+  }
+}
+
+// Distinct accent color per agent — used for tab dot + active text
+function agentColor(id: AgentId): string {
+  switch (id) {
+    case 'pi':          return '#a78bfa'; // violet
+    case 'claude-code': return '#f97316'; // orange  (Anthropic brand)
+    case 'codex':       return '#22d3ee'; // cyan    (OpenAI green-adjacent)
+    case 'copilot':     return '#60a5fa'; // blue
+    case 'opencode':    return '#34d399'; // emerald
+    case 'gemini':      return '#4ade80'; // green   (Google)
+    case 'qwen-code':   return '#f472b6'; // pink
+    case 'crush':       return '#fb7185'; // rose
+    case 'hermes':      return '#fbbf24'; // amber
   }
 }
 
@@ -72,6 +81,7 @@ interface PersistedTab {
   title: string;
   agentId: AgentId;
   cwd: string;
+  agentSessionId?: string;
 }
 
 function loadPersistedTabs(): PersistedTab[] {
@@ -96,6 +106,7 @@ function savePersistedTabs(tabs: Tab[]): void {
       title: t.title,
       agentId: t.agentId,
       cwd: t.cwd,
+      agentSessionId: t.agentSessionId,
     }));
     localStorage.setItem(TABS_STATE_KEY, JSON.stringify(data));
   } catch {
@@ -107,15 +118,36 @@ export default function App() {
   const [home, setHome] = useState<string>('~');
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeId, setActiveId] = useState<string>('');
-  const [installing, setInstalling] = useState(false);
+  // Mirror tabs in a ref so closeTab can read current state without stale closures.
+  const tabsRef = useRef<Tab[]>([]);
+  useEffect(() => { tabsRef.current = tabs; }, [tabs]);  const [installing, setInstalling] = useState(false);
   const [installPct, setInstallPct] = useState(0);
   const [installStatus, setInstallStatus] = useState('starting');
   const [installLog, setInstallLog] = useState<string>('');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<'providers' | 'agents' | 'usage'>('providers');
   const [keepAwakeId, setKeepAwakeId] = useState<number | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [agentList, setAgentList] = useState<AgentInfo[]>([]);
   const [showAgentMenu, setShowAgentMenu] = useState(false);
+  const [showHistoryPanel, setShowHistoryPanel] = useState(false);
+  const [tabHistory, setTabHistory] = useState<TabHistoryEntry[]>([]);
+  const [showLogoMenu, setShowLogoMenu] = useState(false);
+  const logoMenuTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const logoMenuRef = useRef<HTMLDivElement>(null);
+  const [showHistorySubmenu, setShowHistorySubmenu] = useState(false);
+  const historySubmenuTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const openLogoMenu = () => {
+    if (logoMenuTimer.current) { clearTimeout(logoMenuTimer.current); logoMenuTimer.current = null; }
+    setShowLogoMenu(true);
+  };
+  const closeLogoMenu = () => {
+    if (logoMenuTimer.current) clearTimeout(logoMenuTimer.current);
+    logoMenuTimer.current = setTimeout(() => {
+      setShowLogoMenu(false);
+      setShowHistorySubmenu(false);
+    }, 260);
+  };
   const menuCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const openMenu = () => {
     if (menuCloseTimer.current) {
@@ -171,6 +203,7 @@ export default function App() {
           agentId: p.agentId,
           cwd: p.cwd,
           cwdDraft: p.cwd,
+          agentSessionId: p.agentSessionId,
         }));
         setTabs(restored);
         setActiveId(restored[0].id);
@@ -179,6 +212,18 @@ export default function App() {
         const t = newTab(start, def);
         setTabs([t]);
         setActiveId(t.id);
+      }
+      // Load tab history for the history panel.
+      const hist = await window.tday.listTabHistory();
+      setTabHistory(hist);
+      // Briefly show the logo menu on first-ever launch so users discover it.
+      const seenKey = 'tday:logo-menu-hinted';
+      if (!localStorage.getItem(seenKey)) {
+        localStorage.setItem(seenKey, '1');
+        setTimeout(() => {
+          setShowLogoMenu(true);
+          setTimeout(() => setShowLogoMenu(false), 3500);
+        }, 800);
       }
     })();
   }, []);
@@ -193,9 +238,10 @@ export default function App() {
   // default "Close Window" item) and dispatched here via IPC. Stash the
   // live values in a ref so the listener doesn't need to be re-bound on
   // every state change.
-  const handlersRef = useRef<{ addTab: () => void; closeTab: (id: string) => void; activeId: string }>({
+  const handlersRef = useRef<{ addTab: () => void; closeTab: (id: string) => void; restoreTab: () => void; activeId: string }>({
     addTab: () => {},
     closeTab: () => {},
+    restoreTab: () => {},
     activeId: '',
   });
   useEffect(() => {
@@ -204,9 +250,11 @@ export default function App() {
       const id = handlersRef.current.activeId;
       if (id) handlersRef.current.closeTab(id);
     });
+    const offRestore = window.tday.onTabRestore(() => handlersRef.current.restoreTab());
     return () => {
       offNew();
       offClose();
+      offRestore();
     };
   }, []);
 
@@ -257,8 +305,14 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [home]);
 
+  // Agents that support native session resume.
+  const RESUME_CAPABLE: AgentId[] = ['claude-code', 'codex', 'opencode'];
+
   const closeTab = (id: string) => {
-    void window.tday.kill(id);
+    // Read the tab synchronously from the ref (always current).
+    const closing = tabsRef.current.find((t) => t.id === id);
+
+    // Remove the tab from UI immediately.
     setTabs((prev) => {
       const next = prev.filter((t) => t.id !== id);
       if (next.length === 0) {
@@ -269,6 +323,60 @@ export default function App() {
       if (activeId === id) setActiveId(next[next.length - 1].id);
       return next;
     });
+
+    // Async: discover session ID BEFORE killing so session files are still fresh,
+    // then kill the PTY and persist the history entry.
+    const saveHistory = async () => {
+      let sessionId = closing?.agentSessionId ?? null;
+      if (
+        closing &&
+        !sessionId &&
+        RESUME_CAPABLE.includes(closing.agentId) &&
+        closing.cwd
+      ) {
+        // Query the agent's native session while it's still running / just ran.
+        sessionId = await window.tday.latestAgentSession(closing.agentId, closing.cwd);
+      }
+      // Kill AFTER querying so session files are guaranteed flushed.
+      void window.tday.kill(id);
+      if (closing) {
+        const entry: TabHistoryEntry = {
+          histId: `${id}-${Date.now()}`,
+          title: closing.title,
+          agentId: closing.agentId,
+          cwd: closing.cwd,
+          closedAt: Date.now(),
+          agentSessionId: sessionId ?? undefined,
+        };
+        await window.tday.pushTabHistory(entry);
+        const updated = await window.tday.listTabHistory();
+        setTabHistory(updated);
+      }
+    };
+    void saveHistory();
+  };
+
+  /** Restore a tab from history. Uses agent's own --resume / --session when available. */
+  const restoreTabFromHistory = (entry: TabHistoryEntry) => {
+    const t: Tab = {
+      id: `t${nextId++}`,
+      epoch: 0,
+      title: entry.title,
+      agentId: entry.agentId,
+      cwd: entry.cwd,
+      cwdDraft: entry.cwd,
+      agentSessionId: entry.agentSessionId,
+    };
+    setTabs((prev) => [...prev, t]);
+    setActiveId(t.id);
+  };
+
+  /** Restore the most recently closed tab (Cmd+Shift+T). */
+  const restoreTab = () => {
+    const [most, ...rest] = tabHistory;
+    if (!most) return;
+    restoreTabFromHistory(most);
+    void window.tday.deleteTabHistory(most.histId).then(() => setTabHistory(rest));
   };
 
   const addTab = (agentId: AgentId = defaultAgentId) => {
@@ -279,7 +387,7 @@ export default function App() {
   };
 
   // Keep the keyboard-shortcut ref pointed at the latest handlers.
-  handlersRef.current = { addTab, closeTab, activeId };
+  handlersRef.current = { addTab, closeTab, restoreTab, activeId };
 
   // Stage cwd edit; only commit on Enter / Browse / explicit Apply.
   const setTabDraft = (id: string, cwd: string) => {
@@ -334,7 +442,7 @@ export default function App() {
   return (
     <div className="relative flex h-full w-full flex-col bg-[#0a0a0f]">
       {/* Title / tab bar */}
-      <div className="drag flex min-h-11 items-start gap-2 border-b border-zinc-800/60 bg-[#0a0a0f] py-1.5 pl-20 pr-4">
+      <div className={`drag flex min-h-11 items-start gap-2 border-b border-zinc-800/60 bg-[#0a0a0f] py-1.5 ${window.tday.platform === 'darwin' ? 'pl-20' : 'pl-4'} pr-4`}>
         <div className="flex flex-1 flex-wrap items-center gap-1">
           {tabs.map((t) => (
             <button
@@ -351,7 +459,10 @@ export default function App() {
                   : 'text-zinc-400 hover:bg-zinc-900'
               } ${dragId === t.id ? 'opacity-50' : ''}`}
             >
-              <span className="h-1.5 w-1.5 rounded-full bg-fuchsia-400/80" />
+              <span
+                className="h-1.5 w-1.5 shrink-0 rounded-full"
+                style={{ background: agentColor(t.agentId) }}
+              />
               {t.title}
               <span
                 onClick={(e) => {
@@ -375,20 +486,10 @@ export default function App() {
           >
             <button
               onClick={() => addTab()}
-              className="rounded-l-md px-3 py-1 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
-              title={`New ${agentTitle(defaultAgentId)} tab`}
+              className="rounded-md px-3 py-1 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+              title={`New ${agentTitle(defaultAgentId)} tab (hover to pick agent)`}
             >
               +
-            </button>
-            <button
-              onClick={() => setShowAgentMenu((v) => !v)}
-              className="rounded-r-md px-1.5 py-1 text-[10px] leading-none text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
-              title="Choose agent"
-              aria-label="Choose agent"
-            >
-              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M2 3.5 L5 6.5 L8 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
             </button>
             {showAgentMenu ? (
               <div
@@ -430,56 +531,212 @@ export default function App() {
                     </button>
                   );
                 })}
+                <div className="my-1 border-t border-zinc-800/60" />
+                <button
+                  onClick={() => { setShowAgentMenu(false); setSettingsSection('agents'); setSettingsOpen(true); }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="3" />
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                  </svg>
+                  <span>Manage Agents…</span>
+                </button>
                 </div>
               </div>
             ) : null}
           </div>
         </div>
-        {/* Keep-awake: dim screen but block system sleep */}
-        <button
-          onClick={async () => {
-            if (keepAwakeId !== null) {
-              await window.tday.powerBlockerStop(keepAwakeId);
-              setKeepAwakeId(null);
-            } else {
-              const { id } = await window.tday.powerBlockerStart();
-              setKeepAwakeId(id);
-            }
-          }}
-          className={`no-drag ml-1 rounded-md px-2 py-1 transition-colors ${
-            keepAwakeId !== null
-              ? 'text-amber-400 hover:bg-zinc-900'
-              : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100'
-          }`}
-          title={keepAwakeId !== null ? 'Keep-awake active — click to disable' : 'Dim screen, keep system awake'}
-          aria-label="Toggle keep-awake"
+        {/* ── Logo menu: history + keep-awake + settings ── */}
+        <div
+          ref={logoMenuRef}
+          className="no-drag relative ml-2 flex items-center"
+          onMouseEnter={openLogoMenu}
+          onMouseLeave={closeLogoMenu}
         >
-          {keepAwakeId !== null ? (
-            // Moon icon — active state
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z" />
+          {/* Logo trigger — hover opens menu, click also toggles */}
+          <button
+            onClick={() => setShowLogoMenu((v) => !v)}
+            className="no-drag group flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-zinc-900"
+            aria-label="Tday menu"
+          >
+            {/* Gear icon */}
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+              className="text-zinc-600 transition-colors group-hover:text-zinc-400">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
-          ) : (
-            // Moon icon — inactive
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z" />
-            </svg>
+            <Logo size={24} />
+          </button>
+
+          {/* Dropdown */}
+          {showLogoMenu && (
+            <div
+              className="absolute right-0 top-full z-30 pt-1.5"
+              onMouseEnter={openLogoMenu}
+              onMouseLeave={closeLogoMenu}
+            >
+              <div className="min-w-[200px] rounded-md border border-zinc-800 bg-zinc-950 py-1 shadow-2xl text-xs">
+                {/* History — hover to see submenu */}
+                <div
+                  className="relative"
+                  onMouseEnter={() => {
+                    if (historySubmenuTimer.current) { clearTimeout(historySubmenuTimer.current); historySubmenuTimer.current = null; }
+                    setShowHistorySubmenu(true);
+                  }}
+                  onMouseLeave={() => {
+                    if (historySubmenuTimer.current) clearTimeout(historySubmenuTimer.current);
+                    historySubmenuTimer.current = setTimeout(() => setShowHistorySubmenu(false), 180);
+                  }}
+                >
+                  <div className={`flex w-full cursor-default items-center gap-3 px-3 py-2 text-left text-zinc-300 ${showHistorySubmenu ? 'bg-zinc-800 text-zinc-100' : 'hover:bg-zinc-800 hover:text-zinc-100'}`}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-zinc-500">
+                      <circle cx="12" cy="12" r="10" />
+                      <polyline points="12 6 12 12 16 14" />
+                    </svg>
+                    <span className="flex-1">History</span>
+                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" className="text-zinc-600">
+                      <path d="M2 3.5 L5 6.5 L8 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" transform="rotate(-90 5 5)" />
+                    </svg>
+                  </div>
+
+                  {/* History submenu — opens to the left */}
+                  {showHistorySubmenu && (
+                    <div
+                      className="absolute right-full top-0 pr-1"
+                      onMouseEnter={() => {
+                        if (historySubmenuTimer.current) { clearTimeout(historySubmenuTimer.current); historySubmenuTimer.current = null; }
+                      }}
+                      onMouseLeave={() => {
+                        if (historySubmenuTimer.current) clearTimeout(historySubmenuTimer.current);
+                        historySubmenuTimer.current = setTimeout(() => setShowHistorySubmenu(false), 180);
+                      }}
+                    >
+                      <div className="w-80 rounded-md border border-zinc-800 bg-zinc-950 py-1 shadow-2xl text-xs">
+                        {tabHistory.length === 0 ? (
+                          <div className="px-3 py-3 text-center text-zinc-600">No closed tabs</div>
+                        ) : (
+                          <>
+                            {tabHistory.slice(0, 15).map((entry) => (
+                              <button
+                                key={entry.histId}
+                                onClick={() => {
+                                  restoreTabFromHistory(entry);
+                                  void window.tday.deleteTabHistory(entry.histId).then(() =>
+                                    setTabHistory((prev) => prev.filter((e) => e.histId !== entry.histId))
+                                  );
+                                  setShowHistorySubmenu(false);
+                                  setShowLogoMenu(false);
+                                }}
+                                className="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-zinc-800"
+                              >
+                                <span
+                                  className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full"
+                                  style={{ background: agentColor(entry.agentId) }}
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="shrink-0 text-[10px] font-medium" style={{ color: agentColor(entry.agentId) }}>{agentTitle(entry.agentId)}</span>
+                                    <span className="truncate text-zinc-200">{entry.title}</span>
+                                  </div>
+                                  <div className="mt-0.5 flex items-center gap-2 text-[10px] text-zinc-600">
+                                    <span className="min-w-0 flex-1 truncate" title={entry.cwd}>{entry.cwd.replace(/^.*[\/\\](.+[\/\\].+)$/, '…/$1').replace(/\\/g, '/')}</span>
+                                    <span className="shrink-0">
+                                      {(() => {
+                                        const diff = Date.now() - entry.closedAt;
+                                        const m = Math.floor(diff / 60000);
+                                        if (m < 1) return 'just now';
+                                        if (m < 60) return `${m}m ago`;
+                                        const h = Math.floor(m / 60);
+                                        if (h < 24) return `${h}h ago`;
+                                        return `${Math.floor(h / 24)}d ago`;
+                                      })()}
+                                    </span>
+                                  </div>
+                                </div>
+                              </button>
+                            ))}
+                            {tabHistory.length > 12 && (
+                              <div className="px-3 py-1 text-center text-zinc-600">
+                                +{tabHistory.length - 12} more
+                              </div>
+                            )}
+                            <div className="my-1 border-t border-zinc-800/60" />
+                            <button
+                              onClick={() => { setShowHistoryPanel(true); setShowLogoMenu(false); setShowHistorySubmenu(false); }}
+                              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+                            >
+                              <span className="flex-1">Show all…</span>
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Keep Awake */}
+                <button
+                  onClick={async () => {
+                    if (keepAwakeId !== null) {
+                      await window.tday.powerBlockerStop(keepAwakeId);
+                      setKeepAwakeId(null);
+                    } else {
+                      const { id } = await window.tday.powerBlockerStart();
+                      setKeepAwakeId(id);
+                    }
+                  }}
+                  className="flex w-full items-center gap-3 px-3 py-2 text-left text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill={keepAwakeId !== null ? 'currentColor' : 'none'} stroke={keepAwakeId !== null ? 'none' : 'currentColor'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 ${keepAwakeId !== null ? 'text-amber-400' : 'text-zinc-500'}`}>
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z" />
+                  </svg>
+                  <span className="flex-1">Keep Awake</span>
+                  <span className={`text-[10px] rounded px-1.5 py-0.5 ${
+                    keepAwakeId !== null
+                      ? 'bg-amber-400/20 text-amber-300'
+                      : 'bg-zinc-800 text-zinc-500'
+                  }`}>
+                    {keepAwakeId !== null ? 'ON' : 'OFF'}
+                  </span>
+                </button>
+
+                <div className="my-1 border-t border-zinc-800/60" />
+
+                {/* Usage shortcut */}
+                <button
+                  onClick={() => { setSettingsSection('usage'); setSettingsOpen(true); setShowLogoMenu(false); }}
+                  className="flex w-full items-center gap-3 px-3 py-2 text-left text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-zinc-500">
+                    <line x1="18" y1="20" x2="18" y2="10" />
+                    <line x1="12" y1="20" x2="12" y2="4" />
+                    <line x1="6" y1="20" x2="6" y2="14" />
+                  </svg>
+                  <span className="flex-1">Usage</span>
+                </button>
+
+                {/* Settings */}
+                <button
+                  onClick={() => { setSettingsSection('providers'); setSettingsOpen(true); setShowLogoMenu(false); }}
+                  className="flex w-full items-center gap-3 px-3 py-2 text-left text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-zinc-500">
+                    <circle cx="12" cy="12" r="3" />
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                  </svg>
+                  <span className="flex-1">Settings</span>
+                  <span className="text-[10px] text-zinc-600">⌘,</span>
+                </button>
+
+                {/* Version */}
+                <div className="px-3 pb-1 pt-0.5 text-[10px] text-zinc-600 select-text">
+                  Tday v{__APP_VERSION__}
+                </div>
+              </div>
+            </div>
           )}
-        </button>
-        <button
-          onClick={() => setSettingsOpen(true)}
-          className="no-drag ml-1 rounded-md px-2 py-1 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
-          title="Settings"
-          aria-label="Settings"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-          </svg>
-        </button>
-        <span className="no-drag ml-2 flex items-center">
-          <Logo size={24} />
-        </span>
+        </div>
       </div>
 
       {/* Install overlay */}
@@ -570,6 +827,14 @@ export default function App() {
                   agentId={t.agentId}
                   cwd={t.cwd}
                   active={t.id === activeId}
+                  agentSessionId={t.agentSessionId}
+                  onAgentSessionId={(id) => {
+                    setTabs((prev) =>
+                      prev.map((tab) =>
+                        tab.id === t.id ? { ...tab, agentSessionId: id ?? undefined } : tab,
+                      ),
+                    );
+                  }}
                 />
               </div>
             ))}
@@ -580,12 +845,28 @@ export default function App() {
       <Settings
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+        initialSection={settingsSection}
         onSaved={() => {
           // Refresh agent list so default-agent / install-state changes take
           // effect on the next "+" click without an app restart.
           void refreshPi();
         }}
       />
+      {showHistoryPanel && (
+        <HistoryPanel
+          entries={tabHistory}
+          onRestore={(entry) => {
+            restoreTabFromHistory(entry);
+            // Keep history entry so user can restore again; they can delete manually.
+          }}
+          onDelete={(histId) => {
+            void window.tday.deleteTabHistory(histId).then(() =>
+              window.tday.listTabHistory().then(setTabHistory),
+            );
+          }}
+          onClose={() => setShowHistoryPanel(false)}
+        />
+      )}
     </div>
   );
 }
