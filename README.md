@@ -174,6 +174,7 @@ A **Tab** owns one **Session** = one PTY process bound to one agent adapter, one
 | ~~**v0.1.0**~~ ✅ | _Walk_ — Pi end-to-end | Single-tab MVP. Spawn the `pi` agent in a PTY tab. Static provider config from a JSON file. Border-beam shell. |
 | ~~**v0.2.0**~~ ✅ | Multi-agent, multi-tab | Adapters for Claude Code, Codex, Copilot CLI, OpenCode. Tab manager (open/close/reorder/duplicate). Per-tab cwd picker. |
 | ~~**v0.3.0**~~ ✅ | Providers UI + Gateway | Settings panel for 28+ cloud/local providers. DeepSeek Anthropic gateway proxy (OpenAI Responses API → Anthropic). Per-agent model override. |
+| ~~**v0.3.x**~~ ✅ | Multi-agent UI overhaul + Tab History | 9 agent adapters (Crush, Hermes, Qwen-Code added). Per-agent accent colors. Logo dropdown (History, Keep Awake, Usage, Settings). Closed-tab history with one-click restore. Agent-native session resume (claude-code `--resume`, codex `resume`, opencode `--session`). Conversation history replayed on restore. Windows PATH augmentation (nvm-windows, volta, fnm). |
 | **v0.4.0** 🔄 | Local-inference autodetect | TypeScript probe system (Ollama `/api/tags`, LM Studio `/v1/models`, vLLM, llama.cpp). Scan button + discovered-model chips in Settings. Usage analytics backend (SQLite-based pricing + store). mDNS & Rust scanner remaining. |
 | **v0.5.0** | Token usage analytics | Dashboard UI — stacked-area charts, per-agent/provider/model breakdown. Cost estimation with live pricing table. Export CSV/JSON. Adapter `parseUsage()` hooks. |
 | **v0.6.0** | MCP Management | MCP server registry in Settings (add/edit/remove, stdio & SSE transports). Auto-discover running local MCP processes. Per-agent MCP binding. Bundled quick-add servers: filesystem, memory, fetch, git. |
@@ -498,19 +499,17 @@ git push origin v0.1.12
 ---
 ## 9. Supported Harness Agents
 
-| Agent | Install | Session Resume | Conversation History |
-|---|---|---|---|
-| **Pi** (`pi`) | `npm i -g @mariozechner/pi-coding-agent` | — | — |
-| **Claude Code** (`claude-code`) | `npm i -g @anthropic-ai/claude-code` | `--resume <uuid>` | ✅ `~/.claude/projects/` |
-| **Codex** (`codex`) | `npm i -g @openai/codex` | `codex resume <uuid>` | ✅ `~/.codex/sessions/` |
-| **Copilot CLI** (`copilot`) | `npm i -g @github/copilot-cli` | — | — |
-| **OpenCode** (`opencode`) | `npm i -g opencode-ai` | `--session <id>` | ✅ SQLite `~/.local/share/opencode/` |
-| **Gemini** (`gemini`) | `npm i -g @google/gemini-cli` | — | — |
-| **Qwen Code** (`qwen-code`) | `npm i -g qwen-code` | — | — |
-| **Crush** (`crush`) | `npm i -g crush-cli` | — | — |
-| **Hermes** (`hermes`) | `npm i -g hermes-agent` | — | — |
-
-> Agents with ✅ **Conversation History** show previous turns in the terminal on restore, and re-launch the agent with its own `--resume` / `--session` flag so you continue the same conversation context.
+| Agent | Install | Notes |
+|---|---|---|
+| **Pi** (`pi`) | `npm i -g @mariozechner/pi-coding-agent` | |
+| **Claude Code** (`claude-code`) | `npm i -g @anthropic-ai/claude-code` | Session resume via `--resume <uuid>`; conversation history from `~/.claude/projects/` replayed on restore |
+| **Codex** (`codex`) | `npm i -g @openai/codex` | Session resume via `codex resume <uuid>`; conversation history from `~/.codex/sessions/` replayed on restore |
+| **Copilot CLI** (`copilot`) | `npm i -g @github/copilot-cli` | |
+| **OpenCode** (`opencode`) | `npm i -g opencode-ai` | Session resume via `--session <id>`; conversation history from SQLite `~/.local/share/opencode/` replayed on restore |
+| **Gemini** (`gemini`) | `npm i -g @google/gemini-cli` | |
+| **Qwen Code** (`qwen-code`) | `npm i -g qwen-code` | |
+| **Crush** (`crush`) | `npm i -g crush-cli` | |
+| **Hermes** (`hermes`) | install manually, ensure `hermes` is on PATH | |
 
 ---
 ## 10. Supported Model Providers
