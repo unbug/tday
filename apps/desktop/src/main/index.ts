@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, shell, dialog, Menu, powerSaveBlocker } fr
 import { isAbsolute, join } from 'node:path';
 import { electronApp, optimizer, is } from '@electron-toolkit/utils';
 import { spawn as spawnPty, type IPty } from 'node-pty';
-import { spawn as spawnChild, execFileSync, exec as execAsync } from 'node:child_process';
+import { spawn as spawnChild, execFileSync } from 'node:child_process';
 import {
   readFileSync,
   existsSync,
@@ -29,6 +29,8 @@ import {
   type SpawnRequest,
   type UsageRecord,
   type UsageFilter,
+  type AgentHistoryEntry,
+  type AgentHistoryFilter,
 } from '@tday/shared';
 import { createLocalGatewayManager } from './gateway';
 import { discoverLocalServices } from './discovery/index.js';
@@ -45,9 +47,43 @@ import {
   type TabHistoryEntry,
   type SessionMessage,
 } from './tab-history.js';
+import {
+  refreshAndListAgentHistory,
+  triggerHistoryRefresh,
+  hideHistoryEntry,
+  mergeTabEntry,
+} from './agent-history/index.js';
+import { getAllSettings, setSetting, type JsonValue } from './settings-store.js';
+import {
+  loadCronJobs,
+  saveCronJobs,
+  loadCronStats,
+  updateJobStats,
+  CronScheduler,
+} from './cron.js';
+import type { CronJob, CronFireEvent } from '@tday/shared';
 
 const TDAY_DIR = join(homedir(), '.tday');
 const localGatewayManager = createLocalGatewayManager();
+
+// ── CronJob scheduler (module-level singleton) ────────────────────────────────
+// Fires before `registerIpc` so the callback can reference `mainWindow`.
+// The actual `cronScheduler` is created after the BrowserWindow exists.
+let mainWindow: BrowserWindow | null = null;
+
+function fireCronJob(job: CronJob): void {
+  if (!mainWindow || mainWindow.isDestroyed() || shuttingDown) return;
+  const event: CronFireEvent = {
+    jobId: job.id,
+    agentId: job.agentId,
+    cwd: job.cwd,
+    prompt: job.prompt,
+    name: job.name,
+  };
+  mainWindow.webContents.send(IPC.cronJobFired, event);
+}
+
+const cronScheduler = new CronScheduler(fireCronJob);
 
 /**
  * Augment process.env.PATH with common locations where Node toolchains live.
@@ -631,8 +667,11 @@ function createWindow(): void {
     },
   });
 
+  mainWindow = win;
+
   win.on('ready-to-show', () => win.show());
   win.on('close', () => app.quit());
+  win.on('closed', () => { mainWindow = null; });
   win.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url);
     return { action: 'deny' };
@@ -806,12 +845,52 @@ function registerIpc(): void {
             break;
         }
       }
+
+      // Initial prompt: for agents that accept a task as a positional CLI
+      // argument, append it now.  We only do this when NOT resuming a session
+      // (the resumed session already has context) and when the agent is known
+      // to support a positional task argument.
+      //
+      //   codex        → `codex [flags] <task>`
+      //   claude-code  → `claude [flags] <message>`  (starts interactive + pre-seeds first turn)
+      //   opencode     → `opencode run [flags] <message>`  NOTE: positional for default cmd is
+      //                   the *project path*, so we must use the `run` subcommand.
+      //   gemini       → `gemini [flags] <prompt>`
+      //   qwen-code    → `qwen-code [flags] <prompt>`
+      //
+      // For all other agents the prompt is delivered via a timed PTY write
+      // from the main process (see below) — this is reliable even when the
+      // screen is locked because the PTY is a kernel-level resource and the
+      // main-process event loop keeps running.
+      const initialPrompt = req.initialPrompt?.trim();
+      const CLI_PROMPT_AGENTS: AgentId[] = ['codex', 'claude-code', 'opencode', 'gemini', 'qwen-code'];
+      const sentViaCliArg = !!(
+        initialPrompt &&
+        !req.agentSessionId &&
+        CLI_PROMPT_AGENTS.includes(req.agentId)
+      );
+      if (sentViaCliArg && initialPrompt) {
+        if (req.agentId === 'opencode') {
+          // `opencode run [model-flags] <message..>`
+          // The default positional is a project path — must use the `run` subcommand.
+          args = ['run', ...args, initialPrompt];
+        } else {
+          args = [...args, initialPrompt];
+        }
+      }
+
       env = piLike.env;
       if (gatewayResolution?.noProxyHosts?.length) {
         appendNoProxy(env, gatewayResolution.noProxyHosts);
       }
       launchCwd = normalizeLaunchCwd(piLike.cwd);
     }
+
+    // Propagate PTY dimensions as env vars so React-Ink CLIs (e.g.
+    // claude-code) fall back to the correct terminal width via
+    // process.env.COLUMNS when ioctl(TIOCGWINSZ) isn't available.
+    env.COLUMNS = String(req.cols);
+    env.LINES = String(req.rows);
 
     const resolved = resolveExecutable(cmd, env);
     if (!resolved.resolved) {
@@ -833,6 +912,44 @@ function registerIpc(): void {
     });
 
     ptys.set(req.tabId, pty);
+
+    // For agents that do NOT accept a CLI positional prompt (pi, copilot,
+    // crush, hermes, …), write the initial prompt directly to the PTY from the
+    // main process after a startup grace period.
+    //
+    // Doing this in the main process (instead of a renderer setTimeout) means
+    // it is completely reliable: the PTY and Node.js event loop run
+    // independently of whether the window is visible, the screen is locked, or
+    // the renderer is suspended.
+    const initialPromptForPty = req.initialPrompt?.trim();
+    // A sentViaCliArg flag is scoped to the non-pi branch; for pi we always
+    // fall through to the PTY-write path.  Re-derive it here.
+    const _cliAgents: AgentId[] = ['codex', 'claude-code', 'opencode', 'gemini', 'qwen-code'];
+    const needsPtyWrite =
+      initialPromptForPty &&
+      !req.agentSessionId &&
+      !_cliAgents.includes(req.agentId);
+    if (needsPtyWrite && initialPromptForPty) {
+      // Use bracketed-paste mode (XTerm "paste" protocol) so that newlines in
+      // multi-line or markdown prompts are NOT interpreted as Enter keystrokes
+      // by the agent's raw-mode terminal driver.  Modern interactive CLIs
+      // (pi, copilot, hermes, etc.) honour this protocol:
+      //   ESC[200~  <text with literal \n intact>  ESC[201~  CR
+      //
+      // We still strip dangerous C0 control chars OTHER than \n/\r that could
+      // trigger Ctrl+C (\x03), Ctrl+D (\x04), ESC sequences, etc., because
+      // bracketed-paste doesn't protect against those on all terminals.
+      const sanitized = initialPromptForPty
+        .replace(/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F]/g, ' ') // C0 except \n(\x0A) and \r(\x0D) → space
+        .replace(/ {2,}/g, ' ');                             // collapse multiple spaces
+      const bracketedPayload = `\x1b[200~${sanitized}\x1b[201~\r`;
+      const tabId = req.tabId;
+      // 3.5 s grace period — gives the agent time to print its startup UI
+      // and enter its interactive read loop before we feed it the prompt.
+      setTimeout(() => {
+        ptys.get(tabId)?.write(bracketedPayload);
+      }, 3500);
+    }
 
     pty.onData((data) => {
       // Drop late events arriving after the window or app has gone away.
@@ -919,10 +1036,6 @@ function registerIpc(): void {
   ipcMain.handle(IPC.powerBlockerStart, () => {
     // prevent-app-suspension: keeps system awake but allows display to sleep.
     const id = powerSaveBlocker.start('prevent-app-suspension');
-    // On macOS immediately dim the display via pmset.
-    if (process.platform === 'darwin') {
-      execAsync('pmset displaysleepnow', () => { /* ignore errors */ });
-    }
     return { id };
   });
   ipcMain.handle(IPC.powerBlockerStop, (_e, id: number) => {
@@ -935,6 +1048,8 @@ function registerIpc(): void {
   ipcMain.handle(IPC.tabHistoryList, (): TabHistoryEntry[] => loadHistory());
   ipcMain.handle(IPC.tabHistoryPush, (_e, entry: TabHistoryEntry): void => {
     pushHistoryEntry(entry);
+    // Also merge into the agent history index (non-blocking).
+    mergeTabEntry(entry);
   });
   ipcMain.handle(IPC.tabHistoryDelete, (_e, histId: string): void => {
     deleteHistoryEntry(histId);
@@ -947,6 +1062,51 @@ function registerIpc(): void {
     IPC.readAgentSession,
     (_e, agentId: AgentId, sessionId: string, cwd: string): SessionMessage[] =>
       readAgentSession(agentId, sessionId, cwd),
+  );
+
+  // ── Agent History Session Manager ──────────────────────────────────────────
+  ipcMain.handle(
+    IPC.agentHistoryList,
+    async (_e, filter?: AgentHistoryFilter): Promise<AgentHistoryEntry[]> => {
+      // Await the refresh so the renderer always receives populated data.
+      return refreshAndListAgentHistory(filter);
+    },
+  );
+  ipcMain.handle(IPC.agentHistoryHide, (_e, id: string): void => {
+    hideHistoryEntry(id);
+  });
+  ipcMain.handle(IPC.agentHistoryRefresh, (): void => {
+    triggerHistoryRefresh();
+  });
+
+  // ── App Settings (native persistent storage) ────────────────────────────────
+  ipcMain.handle(IPC.settingsGetAll, () => getAllSettings());
+  ipcMain.handle(IPC.settingsSet, (_e, key: string, value: unknown): void => {
+    setSetting(key, value as JsonValue);
+  });
+  // ── Open external URL (https only) ────────────────────────────────────────
+  ipcMain.handle(IPC.openExternal, (_e, url: unknown) => {
+    const safe = String(url);
+    if (/^https:\/\//.test(safe)) void shell.openExternal(safe);
+  });
+
+  // ── CronJob management ─────────────────────────────────────────────────────
+  ipcMain.handle(IPC.cronJobsList, (): CronJob[] => loadCronJobs());
+
+  ipcMain.handle(IPC.cronJobsSave, (_e, jobs: CronJob[]): void => {
+    saveCronJobs(jobs);
+    // Re-schedule all jobs whenever the list changes.
+    cronScheduler.scheduleAll(jobs);
+  });
+
+  ipcMain.handle(IPC.cronJobsTrigger, (_e, jobId: string): void => {
+    const job = loadCronJobs().find((j) => j.id === jobId);
+    if (!job) return;
+    cronScheduler.triggerNow(job);
+  });
+
+  ipcMain.handle(IPC.cronJobsGetStats, (): Record<string, import('@tday/shared').CronJobStats> =>
+    loadCronStats(),
   );
 }
 
@@ -1252,6 +1412,8 @@ app.whenReady().then(() => {
   installAppMenu();
 
   registerIpc();
+  // Start the CronJob scheduler with persisted jobs.
+  cronScheduler.scheduleAll(loadCronJobs());
   // Warm the session usage cache in the background so the first usageQuery
   // is served from cache rather than triggering a cold full scan.
   triggerSessionCacheRefresh();
@@ -1264,12 +1426,14 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   shuttingDown = true;
+  cronScheduler.destroy();
   localGatewayManager.close();
   killAllPtys();
 });
 
 app.on('window-all-closed', () => {
   shuttingDown = true;
+  cronScheduler.destroy();
   killAllPtys();
   if (process.platform !== 'darwin') app.quit();
 });

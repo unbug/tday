@@ -16,6 +16,11 @@ import {
   type UsageSummary,
   type TabHistoryEntry,
   type SessionMessage,
+  type AgentHistoryEntry,
+  type AgentHistoryFilter,
+  type CronJob,
+  type CronJobStats,
+  type CronFireEvent,
 } from '@tday/shared';
 
 const api = {
@@ -91,6 +96,34 @@ const api = {
     ipcRenderer.invoke(IPC.latestAgentSession, agentId, cwd) as Promise<string | null>,
   readAgentSession: (agentId: AgentId, sessionId: string, cwd: string) =>
     ipcRenderer.invoke(IPC.readAgentSession, agentId, sessionId, cwd) as Promise<SessionMessage[]>,
+  // ── Agent History Session Manager ────────────────────────────────────────────
+  listAgentHistory: (filter?: AgentHistoryFilter) =>
+    ipcRenderer.invoke(IPC.agentHistoryList, filter) as Promise<AgentHistoryEntry[]>,
+  hideAgentHistory: (id: string) =>
+    ipcRenderer.invoke(IPC.agentHistoryHide, id) as Promise<void>,
+  refreshAgentHistory: () =>
+    ipcRenderer.invoke(IPC.agentHistoryRefresh) as Promise<void>,
+  // ── App Settings (native persistent storage, replaces localStorage) ──────────
+  getAllSettings: () =>
+    ipcRenderer.invoke(IPC.settingsGetAll) as Promise<Record<string, unknown>>,
+  setSetting: (key: string, value: unknown) =>
+    ipcRenderer.invoke(IPC.settingsSet, key, value) as Promise<void>,
+  openExternal: (url: string) =>
+    ipcRenderer.invoke(IPC.openExternal, url) as Promise<void>,
+  // ── CronJob management ──────────────────────────────────────────────────────
+  listCronJobs: () =>
+    ipcRenderer.invoke(IPC.cronJobsList) as Promise<CronJob[]>,
+  saveCronJobs: (jobs: CronJob[]) =>
+    ipcRenderer.invoke(IPC.cronJobsSave, jobs) as Promise<void>,
+  triggerCronJob: (jobId: string) =>
+    ipcRenderer.invoke(IPC.cronJobsTrigger, jobId) as Promise<void>,
+  getCronStats: () =>
+    ipcRenderer.invoke(IPC.cronJobsGetStats) as Promise<Record<string, CronJobStats>>,
+  onCronFired: (cb: (e: CronFireEvent) => void) => {
+    const fn = (_: unknown, e: CronFireEvent) => cb(e);
+    ipcRenderer.on(IPC.cronJobFired, fn);
+    return () => ipcRenderer.off(IPC.cronJobFired, fn);
+  },
 };
 
 contextBridge.exposeInMainWorld('tday', api);

@@ -94,6 +94,15 @@ export interface SpawnRequest {
    *   opencode     →  `opencode --session <id>`
    */
   agentSessionId?: string;
+  /**
+   * Initial prompt/task to send to the agent on startup.
+   * Passed as a CLI positional argument for agents that support it
+   * (codex, claude-code, opencode, gemini, qwen-code).
+   * For others, the main process writes it directly to the PTY after
+   * the agent is ready — this works even when the screen is locked since
+   * the PTY is a kernel-level resource managed entirely in the main process.
+   */
+  initialPrompt?: string;
 }
 
 /**
@@ -161,6 +170,83 @@ export interface ProvidersConfig {
   profiles: ProviderProfile[];
 }
 
+/**
+ * A session entry in Tday's agent history index.
+ * Represents a conversation from any supported agent's native session files
+ * or from Tday-tracked tab history (fallback for agents with no native files).
+ */
+export interface AgentHistoryEntry {
+  /** Globally unique ID within Tday's index. E.g. "claude-code:<uuid>" or "tday:<histId>". */
+  id: string;
+  /** Agent identifier (AgentId or unknown string for future agents). */
+  agentId: string;
+  /** Agent-native session ID passed to --resume / --session on restore. */
+  sessionId?: string;
+  /** Human-readable title: first user message, or file-derived fallback. */
+  title: string;
+  /** Working directory when the session was created. */
+  cwd: string;
+  /** Unix ms: when the session started. */
+  startedAt: number;
+  /** Unix ms: last activity (used for sorting, grouping). */
+  updatedAt: number;
+  /** Approximate count of user/assistant message turns. */
+  messageCount: number;
+  /**
+   * 'native' = discovered from agent's own session files on disk.
+   * 'tday'   = only tracked via Tday tab-close events (fallback).
+   */
+  source: 'native' | 'tday';
+  /** True when user has hidden (soft-deleted) this entry from the index. */
+  hidden?: boolean;
+}
+
+/** Filter for listAgentHistory. */
+export interface AgentHistoryFilter {
+  agentId?: string;
+  fromTs?: number;
+  limit?: number;
+  includeHidden?: boolean;
+}
+
+// ─── CronJob types ────────────────────────────────────────────────────────────
+
+/**
+ * A scheduled automation job that opens a new agent tab at a defined cron schedule.
+ * Uses standard 5-field cron syntax: "min hour dom month dow"
+ */
+export interface CronJob {
+  id: string;
+  name: string;
+  agentId: AgentId;
+  /** Working directory for the agent tab. */
+  cwd: string;
+  /** The prompt / goal to send to the agent when the cron fires. */
+  prompt: string;
+  /** Standard 5-field cron expression, e.g. "0 9 * * 1-5" */
+  schedule: string;
+  enabled: boolean;
+  createdAt: number;
+}
+
+/** Runtime statistics for a CronJob — stored separately so the job config stays clean. */
+export interface CronJobStats {
+  jobId: string;
+  lastRunAt: number | null;
+  nextRunAt: number | null;
+  runCount: number;
+  lastStatus: 'ok' | 'error' | null;
+}
+
+/** Event sent from main → renderer when a scheduled cron fires. */
+export interface CronFireEvent {
+  jobId: string;
+  agentId: AgentId;
+  cwd: string;
+  prompt: string;
+  name: string;
+}
+
 /** IPC channel names. Keep in sync with preload + main. */
 export const IPC = {
   ptySpawn: 'pty:spawn',
@@ -194,6 +280,21 @@ export const IPC = {
   tabHistoryDelete: 'tab-history:delete',
   latestAgentSession: 'tab-history:latest-session',
   readAgentSession: 'tab-history:read-session',
+  // Agent history session manager
+  agentHistoryList: 'agent-history:list',
+  agentHistoryHide: 'agent-history:hide',
+  agentHistoryRefresh: 'agent-history:refresh',
+  // App settings — native persistent storage (replaces localStorage)
+  settingsGetAll: 'settings:get-all',
+  settingsSet: 'settings:set',
+  // Open external URL in default browser
+  openExternal: 'app:open-external',
+  // CronJob management
+  cronJobsList: 'cron:list',
+  cronJobsSave: 'cron:save',
+  cronJobsTrigger: 'cron:trigger',
+  cronJobsGetStats: 'cron:stats',
+  cronJobFired: 'cron:fired', // main -> renderer
 } as const;
 
 // ─── Discovery types ──────────────────────────────────────────────────────────

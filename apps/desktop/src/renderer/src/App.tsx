@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
-import type { AgentId, AgentInfo, TabHistoryEntry } from '@tday/shared';
+import { startTransition, useEffect, useRef, useState } from 'react';
+import type { AgentId, AgentInfo, TabHistoryEntry, AgentHistoryEntry, CronFireEvent } from '@tday/shared';
 import { Terminal } from './Terminal';
 import { Logo } from './Logo';
 import { Settings } from './Settings';
-import { HistoryPanel } from './HistoryPanel';
 import type { TdayApi } from '../../preload';
 
 declare global {
@@ -29,6 +28,8 @@ interface Tab {
   cwdDraft: string;
   /** Agent-native session ID (UUID etc.) — used for --resume / --session on restore. */
   agentSessionId?: string;
+  /** If set, sent to the PTY automatically once the agent finishes spawning. */
+  initialPrompt?: string;
 }
 
 let nextId = 1;
@@ -70,9 +71,19 @@ function agentColor(id: AgentId): string {
   }
 }
 
+// ── Persistent settings keys ─────────────────────────────────────────────────
+// Settings are stored natively at ~/.tday/settings.json via IPC, not in
+// localStorage. Keys are kept as-is for backward-compat (migration is done
+// automatically when the main process reads from the new store).
 const LAST_CWD_KEY = 'tday:lastCwd';
-const TABS_ORDER_KEY = 'tday:tabsOrder';
 const TABS_STATE_KEY = 'tday:tabs';
+const ACTIVE_TAB_KEY = 'tday:activeTab';
+const KEEP_AWAKE_KEY = 'tday:keep-awake';
+const LOGO_HINTED_KEY = 'tday:logo-menu-hinted';
+
+// Module-level lastCwd cache — populated from settings at startup so sync
+// callers (addTab, newTab) always get a value without an async IPC round-trip.
+let _lastCwdCache = '';
 
 /** Persisted tab record. Epoch is intentionally dropped — every restored
  *  tab gets a fresh epoch=0 because there's no live PTY to be in sync with. */
@@ -84,13 +95,10 @@ interface PersistedTab {
   agentSessionId?: string;
 }
 
-function loadPersistedTabs(): PersistedTab[] {
+function loadPersistedTabsFromRaw(raw: unknown): PersistedTab[] {
   try {
-    const raw = localStorage.getItem(TABS_STATE_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
+    if (!Array.isArray(raw)) return [];
+    return (raw as unknown[]).filter(
       (t): t is PersistedTab =>
         !!t && typeof t === 'object' && typeof (t as PersistedTab).id === 'string',
     );
@@ -100,18 +108,14 @@ function loadPersistedTabs(): PersistedTab[] {
 }
 
 function savePersistedTabs(tabs: Tab[]): void {
-  try {
-    const data: PersistedTab[] = tabs.map((t) => ({
-      id: t.id,
-      title: t.title,
-      agentId: t.agentId,
-      cwd: t.cwd,
-      agentSessionId: t.agentSessionId,
-    }));
-    localStorage.setItem(TABS_STATE_KEY, JSON.stringify(data));
-  } catch {
-    // quota / storage disabled — ignore
-  }
+  const data: PersistedTab[] = tabs.map((t) => ({
+    id: t.id,
+    title: t.title,
+    agentId: t.agentId,
+    cwd: t.cwd,
+    agentSessionId: t.agentSessionId,
+  }));
+  void window.tday.setSetting(TABS_STATE_KEY, data as unknown as Record<string, unknown>[]);
 }
 
 export default function App() {
@@ -125,18 +129,41 @@ export default function App() {
   const [installStatus, setInstallStatus] = useState('starting');
   const [installLog, setInstallLog] = useState<string>('');
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<'providers' | 'agents' | 'usage'>('providers');
+  const [settingsSection, setSettingsSection] = useState<'providers' | 'agents' | 'usage' | 'history' | 'cron'>('providers');
+  // Lazily mount Settings the first time it's opened so its mount effects
+  // don't run at app startup (they trigger extra IPC calls).
+  const [settingsMounted, setSettingsMounted] = useState(false);
+  useEffect(() => { if (settingsOpen) setSettingsMounted(true); }, [settingsOpen]);
   const [keepAwakeId, setKeepAwakeId] = useState<number | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [agentList, setAgentList] = useState<AgentInfo[]>([]);
   const [showAgentMenu, setShowAgentMenu] = useState(false);
-  const [showHistoryPanel, setShowHistoryPanel] = useState(false);
   const [tabHistory, setTabHistory] = useState<TabHistoryEntry[]>([]);
+  const [agentHistory, setAgentHistory] = useState<AgentHistoryEntry[]>([]);
+  const [agentHistoryLoading, setAgentHistoryLoading] = useState(false);
   const [showLogoMenu, setShowLogoMenu] = useState(false);
+  const [hasUpdate, setHasUpdate] = useState(false);
   const logoMenuTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const logoMenuRef = useRef<HTMLDivElement>(null);
   const [showHistorySubmenu, setShowHistorySubmenu] = useState(false);
   const historySubmenuTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Check for a newer GitHub release. Runs once after 10 s, then every 30 min.
+  useEffect(() => {
+    const check = () => {
+      fetch('https://api.github.com/repos/unbug/tday/releases/latest', { cache: 'no-store' })
+        .then((r) => r.json() as Promise<{ tag_name?: string }>)
+        .then(({ tag_name }) => {
+          if (typeof tag_name === 'string') {
+            const remote = tag_name.replace(/^v/, '');
+            setHasUpdate(remote !== __APP_VERSION__);
+          }
+        })
+        .catch(() => { /* network unavailable — silently ignore */ });
+    };
+    const initial = setTimeout(check, 10_000);
+    const interval = setInterval(check, 30 * 60_000);
+    return () => { clearTimeout(initial); clearInterval(interval); };
+  }, []);
   const openLogoMenu = () => {
     if (logoMenuTimer.current) { clearTimeout(logoMenuTimer.current); logoMenuTimer.current = null; }
     setShowLogoMenu(true);
@@ -146,7 +173,7 @@ export default function App() {
     logoMenuTimer.current = setTimeout(() => {
       setShowLogoMenu(false);
       setShowHistorySubmenu(false);
-    }, 260);
+    }, 500);
   };
   const menuCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const openMenu = () => {
@@ -158,37 +185,37 @@ export default function App() {
   };
   const scheduleCloseMenu = () => {
     if (menuCloseTimer.current) clearTimeout(menuCloseTimer.current);
-    menuCloseTimer.current = setTimeout(() => setShowAgentMenu(false), 220);
+    menuCloseTimer.current = setTimeout(() => setShowAgentMenu(false), 500);
   };
   const checkedRef = useRef(false);
   const defaultAgentId: AgentId =
     (agentList.find((a) => a.isDefault)?.id as AgentId | undefined) ?? 'pi';
 
-  const lastCwd = (): string => {
-    try {
-      return localStorage.getItem(LAST_CWD_KEY) || '';
-    } catch {
-      return '';
-    }
-  };
+  const lastCwd = (): string => _lastCwdCache;
   const rememberCwd = (cwd: string) => {
-    try {
-      if (cwd) localStorage.setItem(LAST_CWD_KEY, cwd);
-    } catch {
-      // ignore quota errors
-    }
+    if (!cwd) return;
+    _lastCwdCache = cwd;
+    void window.tday.setSetting(LAST_CWD_KEY, cwd);
   };
 
   useEffect(() => {
     void (async () => {
-      const h = await window.tday.homeDir();
+      // Fetch home dir, agents list, and all persisted settings in parallel.
+      const [h, list, settings] = await Promise.all([
+        window.tday.homeDir(),
+        window.tday.listAgents() as Promise<AgentInfo[]>,
+        window.tday.getAllSettings(),
+      ]);
       setHome(h);
-      // Pull defaults so newly-created tabs use the configured default agent.
-      const list = (await window.tday.listAgents()) as AgentInfo[];
       setAgentList(list);
       const def = (list.find((a) => a.isDefault)?.id as AgentId | undefined) ?? 'pi';
+
+      // Seed the sync lastCwd cache from persisted settings.
+      _lastCwdCache =
+        typeof settings[LAST_CWD_KEY] === 'string' ? (settings[LAST_CWD_KEY] as string) : h;
+
       // Restore previously-open tabs (each spawns a fresh PTY on mount).
-      const persisted = loadPersistedTabs();
+      const persisted = loadPersistedTabsFromRaw(settings[TABS_STATE_KEY]);
       if (persisted.length > 0) {
         // Reset the global counter so future tab ids don't collide.
         const max = persisted.reduce((m, t) => {
@@ -205,26 +232,52 @@ export default function App() {
           cwdDraft: p.cwd,
           agentSessionId: p.agentSessionId,
         }));
+        // Restore to the last-active tab, falling back to the first tab.
+        const savedActiveTabId =
+          typeof settings[ACTIVE_TAB_KEY] === 'string' ? (settings[ACTIVE_TAB_KEY] as string) : null;
+        const activeTabId =
+          savedActiveTabId && restored.some((t) => t.id === savedActiveTabId)
+            ? savedActiveTabId
+            : restored[0].id;
         setTabs(restored);
-        setActiveId(restored[0].id);
+        setActiveId(activeTabId);
       } else {
-        const start = lastCwd() || h;
+        const start = _lastCwdCache || h;
         const t = newTab(start, def);
         setTabs([t]);
         setActiveId(t.id);
       }
-      // Load tab history for the history panel.
-      const hist = await window.tday.listTabHistory();
-      setTabHistory(hist);
-      // Briefly show the logo menu on first-ever launch so users discover it.
-      const seenKey = 'tday:logo-menu-hinted';
-      if (!localStorage.getItem(seenKey)) {
-        localStorage.setItem(seenKey, '1');
-        setTimeout(() => {
-          setShowLogoMenu(true);
-          setTimeout(() => setShowLogoMenu(false), 3500);
-        }, 800);
+      // ── Phase 2: deferred work via requestIdleCallback ──────────────────
+      // Tabs are now set; everything below is non-critical for first render.
+      const idle = (fn: () => void) => {
+        if (typeof requestIdleCallback === 'function')
+          requestIdleCallback(fn, { timeout: 2000 });
+        else setTimeout(fn, 0);
+      };
+      // Tab history for the quick-access submenu.
+      idle(() => {
+        void window.tday.listTabHistory().then((h) => setTabHistory(h));
+      });
+      // Logo hint on first-ever launch.
+      if (!settings[LOGO_HINTED_KEY]) {
+        idle(() => {
+          void window.tday.setSetting(LOGO_HINTED_KEY, true);
+          setTimeout(() => {
+            setShowLogoMenu(true);
+            setTimeout(() => setShowLogoMenu(false), 3500);
+          }, 800);
+        });
       }
+      // Keep Awake restore.
+      if (settings[KEEP_AWAKE_KEY] === true) {
+        idle(() => {
+          void window.tday.powerBlockerStart().then(({ id }) => setKeepAwakeId(id)).catch(() => {});
+        });
+      }
+      // Agent history (heavier I/O, lowest priority).
+      idle(() => {
+        void window.tday.listAgentHistory().then((h) => setAgentHistory(h));
+      });
     })();
   }, []);
 
@@ -232,6 +285,11 @@ export default function App() {
   useEffect(() => {
     if (tabs.length > 0) savePersistedTabs(tabs);
   }, [tabs]);
+
+  // Persist the active tab so we can restore it on next launch.
+  useEffect(() => {
+    if (activeId) void window.tday.setSetting(ACTIVE_TAB_KEY, activeId);
+  }, [activeId]);
 
   // Cmd+T → new tab, Cmd+W → close active tab. The shortcuts are mounted
   // as menu accelerators in the main process (so they don't fight with the
@@ -257,6 +315,26 @@ export default function App() {
       offRestore();
     };
   }, []);
+
+  // CronJob: when the scheduler fires, open a new tab and send the prompt
+  // after a startup grace period so the agent has time to initialise.
+  useEffect(() => {
+    const offCron = window.tday.onCronFired((e: CronFireEvent) => {
+      const t: Tab = {
+        id: `t${nextId++}`,
+        epoch: 0,
+        title: `[Cron] ${e.name}`,
+        agentId: e.agentId,
+        cwd: e.cwd || home,
+        cwdDraft: e.cwd || home,
+        initialPrompt: e.prompt,
+      };
+      setTabs((prev) => [...prev, t]);
+      setActiveId(t.id);
+    });
+    return () => { offCron(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [home]);
 
   const refreshPi = async () => {
     const list = (await window.tday.listAgents()) as AgentInfo[];
@@ -371,6 +449,21 @@ export default function App() {
     setActiveId(t.id);
   };
 
+  /** Restore a tab from an AgentHistoryEntry (new unified history). */
+  const restoreFromAgentHistory = (entry: AgentHistoryEntry) => {
+    const t: Tab = {
+      id: `t${nextId++}`,
+      epoch: 0,
+      title: entry.title,
+      agentId: (entry.agentId as AgentId) ?? 'pi',
+      cwd: entry.cwd || home,
+      cwdDraft: entry.cwd || home,
+      agentSessionId: entry.sessionId,
+    };
+    setTabs((prev) => [...prev, t]);
+    setActiveId(t.id);
+  };
+
   /** Restore the most recently closed tab (Cmd+Shift+T). */
   const restoreTab = () => {
     const [most, ...rest] = tabHistory;
@@ -424,11 +517,7 @@ export default function App() {
       const next = prev.slice();
       const [moved] = next.splice(from, 1);
       next.splice(to, 0, moved);
-      try {
-        localStorage.setItem(TABS_ORDER_KEY, JSON.stringify(next.map((t) => t.id)));
-      } catch {
-        // ignore
-      }
+      // Order is persisted via the savePersistedTabs effect (tabs change triggers it).
       return next;
     });
     setDragId(null);
@@ -444,37 +533,44 @@ export default function App() {
       {/* Title / tab bar */}
       <div className={`drag flex min-h-11 items-start gap-2 border-b border-zinc-800/60 bg-[#0a0a0f] py-1.5 ${window.tday.platform === 'darwin' ? 'pl-20' : 'pl-4'} pr-4`}>
         <div className="flex flex-1 flex-wrap items-center gap-1">
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setActiveId(t.id)}
-              draggable
-              onDragStart={() => onDragStart(t.id)}
-              onDragOver={onDragOver}
-              onDrop={() => onDrop(t.id)}
-              onDragEnd={() => setDragId(null)}
-              className={`no-drag group inline-flex items-center gap-2 rounded-md px-3 py-1 text-xs ${
-                t.id === activeId
-                  ? 'bg-zinc-800 text-zinc-100'
-                  : 'text-zinc-400 hover:bg-zinc-900'
-              } ${dragId === t.id ? 'opacity-50' : ''}`}
-            >
-              <span
-                className="h-1.5 w-1.5 shrink-0 rounded-full"
-                style={{ background: agentColor(t.agentId) }}
-              />
-              {t.title}
-              <span
-                onClick={(e) => {
-                  e.stopPropagation();
-                  closeTab(t.id);
-                }}
-                className="rounded px-1 text-zinc-500 opacity-0 hover:bg-zinc-700 hover:text-zinc-100 group-hover:opacity-100"
+          {tabs.map((t) => {
+            const fullTitle = t.title === agentTitle(t.agentId)
+              ? t.title
+              : `${agentTitle(t.agentId)}: ${t.title}`;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setActiveId(t.id)}
+                draggable
+                onDragStart={() => onDragStart(t.id)}
+                onDragOver={onDragOver}
+                onDrop={() => onDrop(t.id)}
+                onDragEnd={() => setDragId(null)}
+                className={`no-drag group inline-flex items-center gap-2 rounded-md px-3 py-1 text-xs ${
+                  t.id === activeId
+                    ? 'bg-zinc-800 text-zinc-100'
+                    : 'text-zinc-400 hover:bg-zinc-900'
+                } ${dragId === t.id ? 'opacity-50' : ''}`}
               >
-                ×
-              </span>
-            </button>
-          ))}
+                <span
+                  className="h-1.5 w-1.5 shrink-0 rounded-full"
+                  style={{ background: agentColor(t.agentId) }}
+                />
+                <span title={fullTitle} className="max-w-[160px] overflow-hidden whitespace-nowrap">
+                  {fullTitle}
+                </span>
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeTab(t.id);
+                  }}
+                  className="rounded px-1 text-zinc-500 opacity-0 hover:bg-zinc-700 hover:text-zinc-100 group-hover:opacity-100"
+                >
+                  ×
+                </span>
+              </button>
+            );
+          })}
           {/* Split new-tab button: click body opens the default agent.
               Hovering the chevron (or the wrapper) auto-opens the picker so the
               user doesn't have to click twice. A short close delay keeps
@@ -493,7 +589,7 @@ export default function App() {
             </button>
             {showAgentMenu ? (
               <div
-                className="absolute left-0 top-full z-30 min-w-[180px] pt-2"
+                className="no-drag absolute left-0 top-full z-30 min-w-[180px] pt-1"
                 onMouseEnter={openMenu}
                 onMouseLeave={scheduleCloseMenu}
               >
@@ -533,7 +629,7 @@ export default function App() {
                 })}
                 <div className="my-1 border-t border-zinc-800/60" />
                 <button
-                  onClick={() => { setShowAgentMenu(false); setSettingsSection('agents'); setSettingsOpen(true); }}
+                  onClick={() => { setShowAgentMenu(false); startTransition(() => { setSettingsSection('agents'); setSettingsOpen(true); }); }}
                   className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
                 >
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -557,7 +653,7 @@ export default function App() {
           {/* Logo trigger — hover opens menu, click also toggles */}
           <button
             onClick={() => setShowLogoMenu((v) => !v)}
-            className="no-drag group flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-zinc-900"
+            className="no-drag group relative flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-zinc-900"
             aria-label="Tday menu"
           >
             {/* Gear icon */}
@@ -566,13 +662,16 @@ export default function App() {
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
-            <Logo size={24} />
+            {hasUpdate && (
+              <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-emerald-400 ring-1 ring-[#0a0a0f]" />
+            )}
+            {window.tday.platform !== 'win32' && <Logo size={24} />}
           </button>
 
           {/* Dropdown */}
           {showLogoMenu && (
             <div
-              className="absolute right-0 top-full z-30 pt-1.5"
+              className="no-drag absolute right-0 top-full z-30 pt-1"
               onMouseEnter={openLogoMenu}
               onMouseLeave={closeLogoMenu}
             >
@@ -586,10 +685,10 @@ export default function App() {
                   }}
                   onMouseLeave={() => {
                     if (historySubmenuTimer.current) clearTimeout(historySubmenuTimer.current);
-                    historySubmenuTimer.current = setTimeout(() => setShowHistorySubmenu(false), 180);
+                    historySubmenuTimer.current = setTimeout(() => setShowHistorySubmenu(false), 350);
                   }}
                 >
-                  <div className={`flex w-full cursor-default items-center gap-3 px-3 py-2 text-left text-zinc-300 ${showHistorySubmenu ? 'bg-zinc-800 text-zinc-100' : 'hover:bg-zinc-800 hover:text-zinc-100'}`}>
+                  <button className={`flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-left text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 ${showHistorySubmenu ? 'bg-zinc-800 text-zinc-100' : ''}`}>
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-zinc-500">
                       <circle cx="12" cy="12" r="10" />
                       <polyline points="12 6 12 12 16 14" />
@@ -598,33 +697,32 @@ export default function App() {
                     <svg width="10" height="10" viewBox="0 0 10 10" fill="none" className="text-zinc-600">
                       <path d="M2 3.5 L5 6.5 L8 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" transform="rotate(-90 5 5)" />
                     </svg>
-                  </div>
+                  </button>
 
                   {/* History submenu — opens to the left */}
                   {showHistorySubmenu && (
                     <div
-                      className="absolute right-full top-0 pr-1"
+                      className="no-drag absolute right-full top-0 pr-3"
                       onMouseEnter={() => {
                         if (historySubmenuTimer.current) { clearTimeout(historySubmenuTimer.current); historySubmenuTimer.current = null; }
                       }}
                       onMouseLeave={() => {
                         if (historySubmenuTimer.current) clearTimeout(historySubmenuTimer.current);
-                        historySubmenuTimer.current = setTimeout(() => setShowHistorySubmenu(false), 180);
+                        historySubmenuTimer.current = setTimeout(() => setShowHistorySubmenu(false), 350);
                       }}
                     >
                       <div className="w-80 rounded-md border border-zinc-800 bg-zinc-950 py-1 shadow-2xl text-xs">
-                        {tabHistory.length === 0 ? (
-                          <div className="px-3 py-3 text-center text-zinc-600">No closed tabs</div>
+                        {agentHistoryLoading ? (
+                          <div className="px-3 py-3 text-center text-zinc-600">Loading…</div>
+                        ) : agentHistory.length === 0 ? (
+                          <div className="px-3 py-3 text-center text-zinc-600">No history</div>
                         ) : (
                           <>
-                            {tabHistory.slice(0, 15).map((entry) => (
+                            {agentHistory.slice(0, 12).map((entry) => (
                               <button
-                                key={entry.histId}
+                                key={entry.id}
                                 onClick={() => {
-                                  restoreTabFromHistory(entry);
-                                  void window.tday.deleteTabHistory(entry.histId).then(() =>
-                                    setTabHistory((prev) => prev.filter((e) => e.histId !== entry.histId))
-                                  );
+                                  restoreFromAgentHistory(entry);
                                   setShowHistorySubmenu(false);
                                   setShowLogoMenu(false);
                                 }}
@@ -632,44 +730,40 @@ export default function App() {
                               >
                                 <span
                                   className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full"
-                                  style={{ background: agentColor(entry.agentId) }}
+                                  style={{ background: agentColor(entry.agentId as import('@tday/shared').AgentId) }}
                                 />
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-1.5">
-                                    <span className="shrink-0 text-[10px] font-medium" style={{ color: agentColor(entry.agentId) }}>{agentTitle(entry.agentId)}</span>
+                                    <span className="shrink-0 text-[10px] font-medium" style={{ color: agentColor(entry.agentId as import('@tday/shared').AgentId) }}>{agentTitle(entry.agentId as import('@tday/shared').AgentId)}</span>
                                     <span className="truncate text-zinc-200">{entry.title}</span>
                                   </div>
                                   <div className="mt-0.5 flex items-center gap-2 text-[10px] text-zinc-600">
-                                    <span className="min-w-0 flex-1 truncate" title={entry.cwd}>{entry.cwd.replace(/^.*[\/\\](.+[\/\\].+)$/, '…/$1').replace(/\\/g, '/')}</span>
+                                    <span className="min-w-0 flex-1 truncate" title={entry.cwd}>{entry.cwd.replace(/^.*[/\\](.+[/\\].+)$/, '…/$1').replace(/\\/g, '/')}</span>
                                     <span className="shrink-0">
-                                      {(() => {
-                                        const diff = Date.now() - entry.closedAt;
-                                        const m = Math.floor(diff / 60000);
-                                        if (m < 1) return 'just now';
-                                        if (m < 60) return `${m}m ago`;
-                                        const h = Math.floor(m / 60);
-                                        if (h < 24) return `${h}h ago`;
-                                        return `${Math.floor(h / 24)}d ago`;
-                                      })()}
+                                      {new Date(entry.updatedAt).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                     </span>
                                   </div>
                                 </div>
                               </button>
                             ))}
-                            {tabHistory.length > 12 && (
+                            {agentHistory.length > 12 && (
                               <div className="px-3 py-1 text-center text-zinc-600">
-                                +{tabHistory.length - 12} more
+                                +{agentHistory.length - 12} more
                               </div>
                             )}
-                            <div className="my-1 border-t border-zinc-800/60" />
-                            <button
-                              onClick={() => { setShowHistoryPanel(true); setShowLogoMenu(false); setShowHistorySubmenu(false); }}
-                              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
-                            >
-                              <span className="flex-1">Show all…</span>
-                            </button>
                           </>
                         )}
+                        <div className="my-1 border-t border-zinc-800/60" />
+                        <button
+                          onClick={() => {
+                            startTransition(() => { setSettingsOpen(true); setSettingsSection('history'); });
+                            setShowLogoMenu(false);
+                            setShowHistorySubmenu(false);
+                          }}
+                          className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+                        >
+                          <span className="flex-1">Show all…</span>
+                        </button>
                       </div>
                     </div>
                   )}
@@ -681,9 +775,11 @@ export default function App() {
                     if (keepAwakeId !== null) {
                       await window.tday.powerBlockerStop(keepAwakeId);
                       setKeepAwakeId(null);
+                      void window.tday.setSetting(KEEP_AWAKE_KEY, false);
                     } else {
                       const { id } = await window.tday.powerBlockerStart();
                       setKeepAwakeId(id);
+                      void window.tday.setSetting(KEEP_AWAKE_KEY, true);
                     }
                   }}
                   className="flex w-full items-center gap-3 px-3 py-2 text-left text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
@@ -705,7 +801,7 @@ export default function App() {
 
                 {/* Usage shortcut */}
                 <button
-                  onClick={() => { setSettingsSection('usage'); setSettingsOpen(true); setShowLogoMenu(false); }}
+                  onClick={() => { setShowLogoMenu(false); startTransition(() => { setSettingsSection('usage'); setSettingsOpen(true); }); }}
                   className="flex w-full items-center gap-3 px-3 py-2 text-left text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
                 >
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-zinc-500">
@@ -718,7 +814,7 @@ export default function App() {
 
                 {/* Settings */}
                 <button
-                  onClick={() => { setSettingsSection('providers'); setSettingsOpen(true); setShowLogoMenu(false); }}
+                  onClick={() => { setShowLogoMenu(false); startTransition(() => { setSettingsSection('providers'); setSettingsOpen(true); }); }}
                   className="flex w-full items-center gap-3 px-3 py-2 text-left text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
                 >
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-zinc-500">
@@ -729,9 +825,27 @@ export default function App() {
                   <span className="text-[10px] text-zinc-600">⌘,</span>
                 </button>
 
-                {/* Version */}
-                <div className="px-3 pb-1 pt-0.5 text-[10px] text-zinc-600 select-text">
-                  Tday v{__APP_VERSION__}
+                {/* GitHub + Version */}
+                <div className="border-t border-zinc-800/60 px-1 pb-1 pt-1">
+                  <button
+                    onClick={() => void window.tday.openExternal('https://github.com/unbug/tday')}
+                    className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" className="shrink-0">
+                      <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z" />
+                    </svg>
+                    <span className="flex-1">GitHub</span>
+                  </button>
+                  <button
+                    onClick={() => void window.tday.openExternal('https://github.com/unbug/tday/releases')}
+                    className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                      <polyline points="16 3 21 3 21 8" /><line x1="4" y1="20" x2="21" y2="3" />
+                    </svg>
+                    <span className="flex-1 font-mono">v{__APP_VERSION__}</span>
+                    {hasUpdate && <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />}
+                  </button>
                 </div>
               </div>
             </div>
@@ -814,7 +928,9 @@ export default function App() {
 
         <div className="border-beam relative flex-1 overflow-hidden rounded-xl bg-black">
           <div className="absolute inset-[3px] overflow-hidden rounded-[10px] bg-black">
-            {tabs.map((t) => (
+            {/* Render active tab first so its useEffect / PTY spawn gets
+                first IPC priority on startup. */}
+            {[...tabs].sort((a) => (a.id === activeId ? -1 : 0)).map((t) => (
               <div
                 key={t.id}
                 className="h-full w-full"
@@ -828,6 +944,7 @@ export default function App() {
                   cwd={t.cwd}
                   active={t.id === activeId}
                   agentSessionId={t.agentSessionId}
+                  initialPrompt={t.initialPrompt}
                   onAgentSessionId={(id) => {
                     setTabs((prev) =>
                       prev.map((tab) =>
@@ -842,31 +959,28 @@ export default function App() {
         </div>
       </div>
 
-      <Settings
+      {settingsMounted && <Settings
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         initialSection={settingsSection}
+        home={home}
         onSaved={() => {
           // Refresh agent list so default-agent / install-state changes take
           // effect on the next "+" click without an app restart.
           void refreshPi();
         }}
-      />
-      {showHistoryPanel && (
-        <HistoryPanel
-          entries={tabHistory}
-          onRestore={(entry) => {
-            restoreTabFromHistory(entry);
-            // Keep history entry so user can restore again; they can delete manually.
-          }}
-          onDelete={(histId) => {
-            void window.tday.deleteTabHistory(histId).then(() =>
-              window.tday.listTabHistory().then(setTabHistory),
-            );
-          }}
-          onClose={() => setShowHistoryPanel(false)}
-        />
-      )}
+        agentHistory={agentHistory}
+        agentHistoryLoading={agentHistoryLoading}
+        onRestoreHistory={(entry) => {
+          restoreFromAgentHistory(entry);
+          setSettingsOpen(false);
+        }}
+        onHideHistory={(id) => {
+          void window.tday.hideAgentHistory(id).then(() => {
+            setAgentHistory((prev) => prev.filter((e) => e.id !== id));
+          });
+        }}
+      />}
     </div>
   );
 }

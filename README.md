@@ -176,18 +176,19 @@ A **Tab** owns one **Session** = one PTY process bound to one agent adapter, one
 | ~~**v0.3.0**~~ ✅ | Providers UI + Gateway | Settings panel for 28+ cloud/local providers. DeepSeek Anthropic gateway proxy (OpenAI Responses API → Anthropic). Per-agent model override. |
 | ~~**v0.3.x**~~ ✅ | Multi-agent UI overhaul + Tab History | 9 agent adapters (Crush, Hermes, Qwen-Code added). Per-agent accent colors. Logo dropdown (History, Keep Awake, Usage, Settings). Closed-tab history with one-click restore. Agent-native session resume (claude-code `--resume`, codex `resume`, opencode `--session`). Conversation history replayed on restore. Windows PATH augmentation (nvm-windows, volta, fnm). |
 | ~~**v0.4.x**~~ ✅ | Local-inference + UX Polish | Local service discovery (Ollama, LM Studio, vLLM, llama.cpp, SGLang). Usage analytics dashboard (SQLite store, 30+ model pricing, summary cards, daily chart, by-model/agent tables). Settings redesign: History tab, resizable dialog, lazy-mount. Tab title smart clip + hover tooltip, last-active restore on restart. In-app update checker with green-dot badge. claude-code width + double-SIGWINCH fix. Windows menu fix. Electron drag-region fix. |
-| **v0.5.0** 🔄 | Token usage analytics (extended) | Per-tab usage mini-badge. Adapter `parseUsage()` hooks. CSV/JSON export. Budget alerts. |
-| **v0.6.0** | MCP Management | MCP server registry in Settings (add/edit/remove, stdio & SSE transports). Auto-discover running local MCP processes. Per-agent MCP binding. Bundled quick-add servers: filesystem, memory, fetch, git. |
-| **v0.6.1** | Channels Management | Named I/O channels in Settings: pipe agent stdout to files, webhooks, or other agents. Fan-out (broadcast one agent’s output to multiple sinks). Fan-in (merge streams from multiple agents into one tab). Channel editor with live preview. |
-| **v0.6.2** | Custom Agents | `AgentAdapter` public package. Register third-party agents via manifest URL or local path. Agents tab shows community adapters with one-click install. Custom system-prompt per agent. |
-| **v0.7.0** | Browser & Computer Use | `browser-use` agent adapter (Python). Playwright MCP server quick-add. Anthropic computer-use mode toggle (bash / screenshot / text-editor tools). Screenshot side-panel in tab. |
-| **v0.8.0** | Web Search & Web Tools | Search provider settings (Brave, Tavily, Jina, Perplexity). One-click MCP server install for each. Per-agent search-enable toggle. Web page reader / URL fetcher as shared tool. |
-| **v0.9.0** | Skills & Custom Instructions | Per-agent, per-project skill files (`AGENTS.md`, `SKILL.md`, `.instructions.md`). Global skills library in Settings. Skill injection at spawn time. Skill marketplace (import from URL / GitHub). |
-| **v0.10.0** | Cron & Automation | Scheduled agent runs (cron-expression editor in Settings). Trigger types: time, file-watch, webhook, git-event. Per-job log persistence + desktop notification on finish/fail. |
+| ~~**v0.5.x**~~ ✅ | Cron & Automation | **Settings → Cron** tab: job list with enable/clone/delete, ScheduleWidget (Interval / At time / Custom cron with datetime picker), human-readable schedule preview. Cron scheduler in main process (node-cron, persistent JSON store, per-job stats). `initialPrompt` delivered reliably at spawn time: CLI positional arg for codex / claude-code / opencode / gemini / qwen-code; bracketed-paste PTY write (XTerm `ESC[200~`) for pi / copilot / hermes / crush — works even when screen is locked. OpenCode `run` subcommand fix. Job dashboard with next-run countdown, run count, last-status. |
+| **v0.6.0** 🔄 | Token usage analytics (extended) | Per-tab usage mini-badge. Adapter `parseUsage()` hooks. CSV/JSON export. Budget alerts. |
+| **v0.7.0** | MCP Management | MCP server registry in Settings (add/edit/remove, stdio & SSE transports). Auto-discover running local MCP processes. Per-agent MCP binding. Bundled quick-add servers: filesystem, memory, fetch, git. |
+| **v0.7.1** | Channels Management | Named I/O channels in Settings: pipe agent stdout to files, webhooks, or other agents. Fan-out (broadcast one agent's output to multiple sinks). Fan-in (merge streams from multiple agents into one tab). Channel editor with live preview. |
+| **v0.7.2** | Custom Agents | `AgentAdapter` public package. Register third-party agents via manifest URL or local path. Agents tab shows community adapters with one-click install. Custom system-prompt per agent. |
+| **v0.8.0** | Browser & Computer Use | `browser-use` agent adapter (Python). Playwright MCP server quick-add. Anthropic computer-use mode toggle (bash / screenshot / text-editor tools). Screenshot side-panel in tab. |
+| **v0.9.0** | Web Search & Web Tools | Search provider settings (Brave, Tavily, Jina, Perplexity). One-click MCP server install for each. Per-agent search-enable toggle. Web page reader / URL fetcher as shared tool. |
+| **v0.10.0** | Skills & Custom Instructions | Per-agent, per-project skill files (`AGENTS.md`, `SKILL.md`, `.instructions.md`). Global skills library in Settings. Skill injection at spawn time. Skill marketplace (import from URL / GitHub). |
 | **v0.11.0** | Unified long-term memory | SQLite + `sqlite-vec` embedding store. Background embed worker (Rust). MCP server `tday-memory` (`recall` / `remember` / `forget`). Per-project + global scopes. Memory browser + prune UI. |
 | **v0.12.0** | Performance & polish | xterm WebGL renderer. Lazy-render inactive tabs. Session snapshot/restore. Memory budget warnings. Profiling page (CPU/RSS/handles). |
 | **v0.13.0** | Plugins & extensibility | Adapter SDK (`AgentAdapter` public package). Third-party adapters via manifest URL. Custom themes. Plugin marketplace. |
 | **v0.14.0** | Sync & teams | Optional E2EE sync of memory + usage across devices. Team dashboards. Shared provider pools. |
+| **v1.0.0** | GA | Auto-update (Squirrel), signed & notarised builds for macOS/Windows/Linux, full docs site, telemetry opt-in. |
 | **v1.0.0** | GA | Auto-update (Squirrel), signed & notarised builds for macOS/Windows/Linux, full docs site, telemetry opt-in. |
 
 ---
@@ -292,7 +293,20 @@ The acceptance criterion: **`npm run dev` opens a window with one tab running th
 - [ ] Toast notification “Found Ollama with N models — add as provider?”
 - [ ] Background watch loop with exponential back-off
 
-### v0.5.0 — Token usage analytics (extended)
+### ~~v0.5.x — Cron & Automation~~ ✅
+- [x] **Settings → Cron** tab — job list sidebar with enable toggle, edit, clone, delete
+- [x] **ScheduleWidget** — three modes: Interval (every N min/hour/day), At time (H:M + Daily/Weekdays/Weekly/Monthly), Custom (datetime-local picker auto-fills expr + raw cron input)
+- [x] Human-readable schedule preview (`Every weekday at 09:00  0 9 * * 1-5`)
+- [x] **`cron.ts`** main-process scheduler — `node-cron`, persistent JSON store, per-job run stats (lastRunAt, nextRunAt, runCount, lastStatus)
+- [x] **Job dashboard** — summary cards per job, next-run countdown, last-status badge, manual ▶ Run, Refresh
+- [x] `initialPrompt` on `SpawnRequest` — prompt flows renderer → main without any renderer-side setTimeout
+  - [x] CLI positional arg for `codex` / `claude-code` / `opencode run` / `gemini` / `qwen-code`
+  - [x] Bracketed-paste PTY write (`ESC[200~…ESC[201~`) for `pi` / `copilot` / `crush` / `hermes` — works even when screen is locked
+- [x] OpenCode `run` subcommand fix (positional was misinterpreted as project path)
+- [x] Clone cron job (Copy of X, enabled:false, opens in editor)
+- [x] Cron UI theme: `datetime-local` input uses `input-date` class (dark `color-scheme` + fuchsia calendar icon)
+
+### v0.6.0 — Token usage analytics (extended)
 - [x] Dashboard UI: summary cards, daily chart, by-model and by-agent breakdown
 - [ ] Per-tab usage mini-badge (tokens / estimated cost)
 - [ ] Adapter `parseUsage()` hooks scraping token counts from agent output
@@ -300,7 +314,7 @@ The acceptance criterion: **`npm run dev` opens a window with one tab running th
 - [ ] CSV / JSON export
 - [ ] Budget alerts (configurable per-agent / global cap)
 
-### v0.6.0 — MCP Management
+### v0.7.0 — MCP Management
 MCP (Model Context Protocol) lets agents use tools, access resources, and receive prompts from external servers. Tday becomes the central registry for all MCP connections — configure once, available everywhere.
 
 - [ ] **Settings → MCP Servers** tab
@@ -317,7 +331,7 @@ MCP (Model Context Protocol) lets agents use tools, access resources, and receiv
 - [ ] Inject `--mcp-config <json>` into Claude Code / `opencode` / `gemini` at spawn time
 - [ ] MCP server log viewer inside the app
 
-### v0.6.1 — Channels Management
+### v0.7.1 — Channels Management
 Named I/O channels let you wire agent outputs to external sinks or other agents — turning Tday into a lightweight multi-agent orchestrator.
 
 - [ ] **Settings → Channels** tab
@@ -331,7 +345,7 @@ Named I/O channels let you wire agent outputs to external sinks or other agents 
 - [ ] Per-tab channel binding (drag-and-drop tab onto channel)
 - [ ] Persist channel config to `~/.tday/channels.json`
 
-### v0.6.2 — Custom Agents
+### v0.7.2 — Custom Agents
 Make `AgentAdapter` a public package so the community can ship their own agent integrations.
 
 - [ ] Publish `@tday/adapter-sdk` (TypeScript types + test harness)
@@ -343,7 +357,7 @@ Make `AgentAdapter` a public package so the community can ship their own agent i
 - [ ] Custom system-prompt per agent (injected before every session)
 - [ ] Adapter sandbox: run with `--no-asar` + restricted IPC subset
 
-### v0.7.0 — Browser & Computer Use
+### v0.8.0 — Browser & Computer Use
 Bring browser-automation and computer-use capabilities into Tday as first-class citizens — configure them once, launch them like any other agent tab.
 
 - [ ] **`browser-use` adapter** (`packages/adapters/browser-use`)
@@ -359,7 +373,7 @@ Bring browser-automation and computer-use capabilities into Tday as first-class 
   - [ ] Safety warning banner in UI
 - [ ] **Screenshot side-panel** — display screenshots emitted by computer-use tools inline in the tab
 
-### v0.8.0 — Web Search & Web Tools
+### v0.9.0 — Web Search & Web Tools
 Give every agent instant access to the live web — configure search providers in Settings and inject them as MCP tools per agent.
 
 - [ ] **Settings → Web Search** sub-panel
@@ -370,7 +384,7 @@ Give every agent instant access to the live web — configure search providers i
 - [ ] **Web page reader / URL fetcher** shared tool (via Jina Reader or `@modelcontextprotocol/server-fetch`)
 - [ ] Show active search provider badge on tab header
 
-### v0.9.0 — Skills & Custom Instructions
+### v0.10.0 — Skills & Custom Instructions
 Define reusable instruction files that are automatically injected into agent sessions.
 
 - [ ] **Skill file formats supported**: `AGENTS.md`, `SKILL.md`, `.instructions.md`, `CLAUDE.md`, `copilot-instructions.md`
@@ -381,19 +395,6 @@ Define reusable instruction files that are automatically injected into agent ses
   - [ ] Enable/disable per agent-kind
 - [ ] **Skill injection** at spawn time (`--system-prompt` / `--instructions` / temp context file)
 - [ ] **Skill marketplace** — import from GitHub URL or gist
-
-### v0.10.0 — Cron & Automation
-Run agents on a schedule or in response to events — unattended coding tasks, nightly reviews, automated reports.
-
-- [ ] **Settings → Automation** tab
-  - [ ] Job list: name, agent, provider, cwd, prompt/task, schedule
-  - [ ] Cron expression editor with human-readable preview
-  - [ ] One-shot / interval / cron schedule types
-- [ ] **Trigger types**: time (cron), file-watcher (`chokidar`), webhook (local HTTP), git hook
-- [ ] **Job execution**: spawn PTY session (optionally headless / minimised tab)
-- [ ] **Output persistence**: save full transcript per run to `~/.tday/runs/`
-- [ ] **Notifications**: desktop notification on success/fail
-- [ ] **Job history** panel: last N runs, exit code, duration, token cost
 
 ### v0.11.0 — Unified long-term memory
 - [ ] `sqlite-vec` embedding store (Rust)

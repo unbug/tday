@@ -18,12 +18,18 @@ interface Props {
    * this cwd, so App.tsx can store it on the Tab for future restores.
    */
   onAgentSessionId?: (id: string | null) => void;
+  /**
+   * If set, this text is sent to the PTY automatically ~1.5 s after the
+   * agent spawns (giving the agent time to print its initial UI).
+   * A carriage-return is appended so the agent processes the command.
+   */
+  initialPrompt?: string;
 }
 
 // Agents that support native session resume.
 const RESUME_CAPABLE: AgentId[] = ['claude-code', 'codex', 'opencode'];
 
-export function Terminal({ tabId, agentId, cwd, active, agentSessionId, onAgentSessionId }: Props) {
+export function Terminal({ tabId, agentId, cwd, active, agentSessionId, onAgentSessionId, initialPrompt }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const spawnedRef = useRef(false);
   const termRef = useRef<XTerm | null>(null);
@@ -81,6 +87,10 @@ export function Terminal({ tabId, agentId, cwd, active, agentSessionId, onAgentS
     });
 
     const onResize = () => {
+      // Skip when container is hidden (display:none). FitAddon.fit() is a no-op
+      // for zero-width elements, so term.cols retains stale dims — sending
+      // resize would fire a spurious SIGWINCH with wrong dimensions.
+      if (!containerRef.current || containerRef.current.offsetWidth === 0) return;
       fit.fit();
       void window.tday.resize(tabId, term.cols, term.rows);
     };
@@ -89,6 +99,13 @@ export function Terminal({ tabId, agentId, cwd, active, agentSessionId, onAgentS
 
     // Async init: render history (if resuming) then spawn.
     const init = async () => {
+      // Wait one animation frame so xterm.js's canvas renderer can compute
+      // font metrics. Without this, FitAddon.fit() may be a no-op (returning
+      // undefined because actualCellWidth === 0), leaving term.cols at the
+      // default 80. Claude-code (Ink) reads process.stdout.columns at startup
+      // from the PTY window size — if we spawn with cols=80 it wraps there.
+      await new Promise<void>((res) => requestAnimationFrame(() => { fit.fit(); res(); }));
+
       // If we have a session ID, load and render the conversation history
       // so the user sees it immediately before the agent starts.
       if (agentSessionId && RESUME_CAPABLE.includes(agentId) && cwd) {
@@ -119,14 +136,23 @@ export function Terminal({ tabId, agentId, cwd, active, agentSessionId, onAgentS
         }
       }
 
+      const spawnCols = term.cols;
+      const spawnRows = term.rows;
       await window.tday
         .spawn({
           tabId,
           agentId,
           cwd,
-          cols: term.cols,
-          rows: term.rows,
+          cols: spawnCols,
+          rows: spawnRows,
           agentSessionId,
+          // Pass the initial prompt to the main process so it can either
+          // supply it as a CLI argument (for agents that support positional
+          // task args) or write it directly to the PTY after a grace period.
+          // Either way the write happens entirely in the main process, which
+          // runs independently of the renderer's visibility state, making it
+          // reliable even when the screen is locked.
+          initialPrompt: initialPrompt || undefined,
         })
         .catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
@@ -135,6 +161,15 @@ export function Terminal({ tabId, agentId, cwd, active, agentSessionId, onAgentS
             `\x1b[2mset ~/.tday/agents.json → { "agents": { "${agentId}": { "bin": "/absolute/path/to/${agentId === 'claude-code' ? 'claude' : agentId === 'copilot' ? 'copilot' : agentId}" } } }\x1b[0m`,
           );
         });
+
+      // Re-sync only if the terminal was resized while waiting for spawn.
+      // Avoid sending an unnecessary SIGWINCH (which can disrupt claude-code's
+      // session initialization) when cols/rows haven't actually changed.
+      fit.fit();
+      if (term.cols !== spawnCols || term.rows !== spawnRows) {
+        void window.tday.resize(tabId, term.cols, term.rows);
+      }
+
     };
 
     void init();
@@ -152,20 +187,22 @@ export function Terminal({ tabId, agentId, cwd, active, agentSessionId, onAgentS
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Whenever the tab becomes active, refit and steal focus.
+  // Whenever the tab becomes active, steal focus.
+  // Resize is intentionally omitted here: the ResizeObserver on containerRef
+  // already fires when display:none → display:block, which covers tab switches.
+  // Sending resize here as well would deliver a duplicate SIGWINCH to the PTY
+  // (e.g. claude-code / Ink) right during session initialisation, causing it
+  // to re-render its startup UI and appear to start a new session.
   useEffect(() => {
     if (!active) return;
     const term = termRef.current;
-    const fit = fitRef.current;
     if (!term) return;
     const raf = requestAnimationFrame(() => {
       try {
-        fit?.fit();
-        void window.tday.resize(tabId, term.cols, term.rows);
+        term.focus();
       } catch {
         // ignore — element may have unmounted
       }
-      term.focus();
     });
     return () => cancelAnimationFrame(raf);
   }, [active, tabId]);
