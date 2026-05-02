@@ -41,5 +41,7 @@ console.log(`[release] tagging v${next}`);
 execSync('git add ' + targets.map(t => JSON.stringify(t)).join(' '), { stdio: 'inherit', cwd: root });
 execSync(`git commit -m "chore: release v${next}"`, { stdio: 'inherit', cwd: root });
 execSync(`git tag v${next}`, { stdio: 'inherit', cwd: root });
-console.log(`[release] done — run: git push origin main --tags`);
+console.log(`[release] pushing v${next} to origin...`);
+execSync('git push origin main --tags', { stdio: 'inherit', cwd: root });
+console.log(`[release] done — GitHub Actions will pick up tag v${next}`);
 console.log(`[release] artifacts: apps/desktop/release/${next}/`);
