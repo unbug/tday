@@ -175,8 +175,8 @@ A **Tab** owns one **Session** = one PTY process bound to one agent adapter, one
 | ~~**v0.2.0**~~ ✅ | Multi-agent, multi-tab | Adapters for Claude Code, Codex, Copilot CLI, OpenCode. Tab manager (open/close/reorder/duplicate). Per-tab cwd picker. |
 | ~~**v0.3.0**~~ ✅ | Providers UI + Gateway | Settings panel for 28+ cloud/local providers. DeepSeek Anthropic gateway proxy (OpenAI Responses API → Anthropic). Per-agent model override. |
 | ~~**v0.3.x**~~ ✅ | Multi-agent UI overhaul + Tab History | 9 agent adapters (Crush, Hermes, Qwen-Code added). Per-agent accent colors. Logo dropdown (History, Keep Awake, Usage, Settings). Closed-tab history with one-click restore. Agent-native session resume (claude-code `--resume`, codex `resume`, opencode `--session`). Conversation history replayed on restore. Windows PATH augmentation (nvm-windows, volta, fnm). |
-| **v0.4.0** 🔄 | Local-inference autodetect | TypeScript probe system (Ollama `/api/tags`, LM Studio `/v1/models`, vLLM, llama.cpp). Scan button + discovered-model chips in Settings. Usage analytics backend (SQLite-based pricing + store). mDNS & Rust scanner remaining. |
-| **v0.5.0** | Token usage analytics | Dashboard UI — stacked-area charts, per-agent/provider/model breakdown. Cost estimation with live pricing table. Export CSV/JSON. Adapter `parseUsage()` hooks. |
+| ~~**v0.4.x**~~ ✅ | Local-inference + UX Polish | Local service discovery (Ollama, LM Studio, vLLM, llama.cpp, SGLang). Usage analytics dashboard (SQLite store, 30+ model pricing, summary cards, daily chart, by-model/agent tables). Settings redesign: History tab, resizable dialog, lazy-mount. Tab title smart clip + hover tooltip, last-active restore on restart. In-app update checker with green-dot badge. claude-code width + double-SIGWINCH fix. Windows menu fix. Electron drag-region fix. |
+| **v0.5.0** 🔄 | Token usage analytics (extended) | Per-tab usage mini-badge. Adapter `parseUsage()` hooks. CSV/JSON export. Budget alerts. |
 | **v0.6.0** | MCP Management | MCP server registry in Settings (add/edit/remove, stdio & SSE transports). Auto-discover running local MCP processes. Per-agent MCP binding. Bundled quick-add servers: filesystem, memory, fetch, git. |
 | **v0.6.1** | Channels Management | Named I/O channels in Settings: pipe agent stdout to files, webhooks, or other agents. Fan-out (broadcast one agent’s output to multiple sinks). Fan-in (merge streams from multiple agents into one tab). Channel editor with live preview. |
 | **v0.6.2** | Custom Agents | `AgentAdapter` public package. Register third-party agents via manifest URL or local path. Agents tab shows community adapters with one-click install. Custom system-prompt per agent. |
@@ -250,7 +250,7 @@ The acceptance criterion: **`npm run dev` opens a window with one tab running th
 - [ ] Secrets via Rust `keyring` crate (currently plaintext `~/.tday/providers.json`)
 - [ ] Per-tab provider override + "last-used" memory
 
-### v0.4.0 — Local-inference autodetect 🔄
+### v0.4.0 — Local-inference autodetect + UX Polish ✅
 - [x] TypeScript probe system (`discovery/probe.ts`, `specs.ts`, `index.ts`)
   - [x] TCP pre-filter then HTTP fingerprint for each service
   - [x] Ollama: `GET /api/tags` → `models[].name`
@@ -262,18 +262,38 @@ The acceptance criterion: **`npm run dev` opens a window with one tab running th
 - [x] `probeBaseUrl` for manual base-URL scan (tries `/models`, `/v1/models`, `/api/tags`)
 - [x] IPC channel `discovery:probe-url` wired in main process
 - [x] Settings UI: Scan button + latency badge + discovered-model chips + `discoveredModels` persistence
-- [x] Usage analytics backend
+- [x] Usage analytics backend + **full dashboard UI**
   - [x] `usage/store.ts` — SQLite-backed append + query
   - [x] `usage/pricing.ts` — per-model cost table for 30+ providers
   - [x] IPC channels `usage:append` / `usage:query`
-  - [x] Usage tab skeleton in Settings
+  - [x] Left sidebar (period filter: today/7d/30d/90d/custom, agent filter, refresh)
+  - [x] Right panel: 3-column summary cards, daily bar chart, by-model table, by-agent table
+- [x] **Settings redesign**
+  - [x] History tab: agent sidebar, full-text search, time-based grouping, restore / hide entries
+  - [x] Resizable dialog (drag handle)
+  - [x] Lazy-mount (first open only) + `startTransition` for low-priority render
+  - [x] Provider list fills remaining height; Add provider pinned at bottom, default expanded
+- [x] **Tab UX**
+  - [x] Tab title CSS-clip (`max-w`) with full title on hover tooltip
+  - [x] Last-active tab persisted and restored on restart; active tab sorted first in DOM
+- [x] **Terminal fixes**
+  - [x] claude-code terminal width: RAF before spawn ensures font metrics; `COLUMNS`/`LINES` env vars as fallback
+  - [x] Double-SIGWINCH bug fixed: removed duplicate resize from active-tab effect; `ResizeObserver` guard for hidden containers
+- [x] **In-app update checker** — GitHub releases API after 10 s then every 30 min; green dot badge on gear button; GitHub + releases links in menu
+- [x] **Platform / UX fixes**
+  - [x] Windows: keep full menu, hide Logo only on win32
+  - [x] All dropdowns marked `no-drag` to prevent Electron drag-region swallowing hover events
+  - [x] Menu close delay 500 ms + padding bridge to keep submenus reachable
+  - [x] Keep Awake uses `prevent-app-suspension` only (no screen-dim side-effect)
+  - [x] History entries show full `year · month · day · HH:MM`
+  - [x] `openExternal` IPC (https-only) for in-app browser links
 - [ ] Rust scanner (`tday-core`) — TCP probe + HTTP fingerprint in native binary
 - [ ] mDNS/Bonjour discovery for LAN servers
 - [ ] Toast notification “Found Ollama with N models — add as provider?”
 - [ ] Background watch loop with exponential back-off
 
-### v0.5.0 — Token usage analytics
-- [ ] Dashboard UI: stacked-area chart (per-agent/provider/model over time)
+### v0.5.0 — Token usage analytics (extended)
+- [x] Dashboard UI: summary cards, daily chart, by-model and by-agent breakdown
 - [ ] Per-tab usage mini-badge (tokens / estimated cost)
 - [ ] Adapter `parseUsage()` hooks scraping token counts from agent output
 - [ ] Live cost estimation using pricing table
