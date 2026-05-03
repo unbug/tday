@@ -1,6 +1,6 @@
 {
   "name": "@tday/desktop",
-  "version": "0.5.14",
+  "version": "0.5.15",
   "private": true,
   "description": "Tday desktop app",
   "author": "unbug",
@@ -13,7 +13,8 @@
     "package:linux": "electron-builder --linux --x64 -c electron-builder.yml",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "lint": "eslint src/"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
