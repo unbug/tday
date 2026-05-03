@@ -30,6 +30,8 @@ interface Tab {
   agentSessionId?: string;
   /** If set, sent to the PTY automatically once the agent finishes spawning. */
   initialPrompt?: string;
+  /** True when opened by the cron scheduler — agents use batch/non-interactive mode. */
+  isCronJob?: boolean;
 }
 
 let nextId = 1;
@@ -328,6 +330,7 @@ export default function App() {
         cwd: e.cwd || home,
         cwdDraft: e.cwd || home,
         initialPrompt: e.prompt,
+        isCronJob: true,
       };
       setTabs((prev) => [...prev, t]);
       setActiveId(t.id);
@@ -945,6 +948,7 @@ export default function App() {
                   active={t.id === activeId}
                   agentSessionId={t.agentSessionId}
                   initialPrompt={t.initialPrompt}
+                  isCronJob={t.isCronJob}
                   onAgentSessionId={(id) => {
                     setTabs((prev) =>
                       prev.map((tab) =>

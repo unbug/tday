@@ -103,6 +103,15 @@ export interface SpawnRequest {
    * the PTY is a kernel-level resource managed entirely in the main process.
    */
   initialPrompt?: string;
+  /**
+   * True when this tab was opened by the cron scheduler (not manually by the
+   * user).  The main process uses this to select a non-interactive "batch"
+   * launch mode for each agent:
+   *   claude-code → `claude -p <prompt>`   (skips workspace trust dialog, exits when done)
+   *   opencode    → `opencode run <prompt>` (one-shot mode, exits on completion)
+   * Agents without a dedicated batch mode are unaffected.
+   */
+  isCronJob?: boolean;
 }
 
 /**

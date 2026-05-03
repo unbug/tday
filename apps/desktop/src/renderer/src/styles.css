@@ -4,6 +4,26 @@
 @tailwind utilities;
 
 @layer components {
+  /* prose-mini: compact dark markdown for cron card prompts */
+  .prose-mini {
+    @apply leading-relaxed text-zinc-500;
+  }
+  .prose-mini h1, .prose-mini h2, .prose-mini h3 {
+    @apply mt-1 font-semibold text-zinc-300;
+  }
+  .prose-mini strong { @apply font-semibold text-zinc-300; }
+  .prose-mini em { @apply italic text-zinc-400; }
+  .prose-mini code {
+    @apply rounded bg-zinc-800 px-0.5 font-mono text-[9px] text-fuchsia-300;
+  }
+  .prose-mini ul, .prose-mini ol {
+    @apply ml-3 list-inside space-y-0.5;
+  }
+  .prose-mini ul { @apply list-disc; }
+  .prose-mini ol { @apply list-decimal; }
+  .prose-mini p { @apply my-0; }
+  .prose-mini a { @apply text-fuchsia-400 underline; }
+
   .input {
     @apply w-full rounded-md border border-zinc-800 bg-zinc-900/80 px-3 py-1.5 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-fuchsia-500/60 focus:ring-1 focus:ring-fuchsia-500/40;
   }

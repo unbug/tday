@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, dialog, Menu, powerSaveBlocker } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, dialog, Menu, powerSaveBlocker, powerMonitor } from 'electron';
 import { isAbsolute, join } from 'node:path';
 import { electronApp, optimizer, is } from '@electron-toolkit/utils';
 import { spawn as spawnPty, type IPty } from 'node-pty';
@@ -71,6 +71,19 @@ const localGatewayManager = createLocalGatewayManager();
 // The actual `cronScheduler` is created after the BrowserWindow exists.
 let mainWindow: BrowserWindow | null = null;
 
+/**
+ * Returns true if semver string `v` is >= `major.minor.patch`.
+ * Accepts formats like "0.128.0", "v0.128.0", "0.128.0-beta.1".
+ */
+function semverAtLeast(v: string, major: number, minor: number, patch: number): boolean {
+  const m = v.replace(/^v/, '').match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!m) return false;
+  const [, ma, mi, pa] = m.map(Number);
+  if (ma !== major) return ma > major;
+  if (mi !== minor) return mi > minor;
+  return pa >= patch;
+}
+
 function fireCronJob(job: CronJob): void {
   if (!mainWindow || mainWindow.isDestroyed() || shuttingDown) return;
   const event: CronFireEvent = {
@@ -80,6 +93,23 @@ function fireCronJob(job: CronJob): void {
     prompt: job.prompt,
     name: job.name,
   };
+
+  // For codex cron jobs: always enable the /goal feature (requires >= v0.128.0)
+  // and auto-prepend `/goal` to the prompt so users don't have to type it.
+  if (job.agentId === 'codex') {
+    try {
+      const det = detectGeneric('codex');
+      if (det.available && det.version && semverAtLeast(det.version, 0, 128, 0)) {
+        spawnChild('codex', ['features', 'enable', 'goals'], {
+          stdio: 'ignore',
+          env: { ...process.env },
+        }).on('error', () => { /* ignore — best-effort */ });
+        if (event.prompt) event.prompt = `/goal ${event.prompt}`;
+      }
+      // version < 0.128.0: fire without /goal; user can upgrade codex.
+    } catch { /* ignore */ }
+  }
+
   mainWindow.webContents.send(IPC.cronJobFired, event);
 }
 
@@ -640,6 +670,10 @@ const ptys = new Map<string, IPty>();
  * uncaught exception dialog. Guarding sends on this flag prevents the dialog.
  */
 let shuttingDown = false;
+/** caffeinate(8) child process used for lid-close sleep prevention on macOS. */
+let caffeinateProc: ReturnType<typeof spawnChild> | null = null;
+/** Whether Keep Awake is intentionally active (survives sleep/wake cycles). */
+let keepAwakeActive = false;
 
 function killAllPtys(): void {
   for (const p of ptys.values()) {
@@ -863,20 +897,34 @@ function registerIpc(): void {
       // screen is locked because the PTY is a kernel-level resource and the
       // main-process event loop keeps running.
       const initialPrompt = req.initialPrompt?.trim();
-      const CLI_PROMPT_AGENTS: AgentId[] = ['codex', 'claude-code', 'opencode', 'gemini', 'qwen-code'];
+      // For opencode cron jobs use `opencode run [flags] <prompt>` (one-shot).
+      // claude-code keeps the interactive TUI + CLI arg approach so that sessions
+      // are recorded (history). `-p` non-interactive mode skips session persistence.
+      if (req.isCronJob && req.agentId === 'opencode' && !req.agentSessionId) {
+        args = ['run', ...args];
+      }
+
+      // opencode is intentionally excluded from CLI_PROMPT_AGENTS for interactive tabs:
+      //   `opencode run <msg>` is a non-interactive one-shot mode that exits
+      //   after the task completes, leaving a dead tab with no way to continue.
+      //   Instead we launch the interactive TUI (`opencode` with no subcommand)
+      //   and deliver the prompt via bracketed-paste PTY write — the TUI stays
+      //   open after the response so the user can review and continue.
+      //   opentui (opencode's TUI framework) confirms bracketedPasteStart/End
+      //   support, so ESC[200~…ESC[201~ is honoured.
+      // For cron tabs opencode IS handled via `opencode run` (added above), so
+      // we include it in CLI_PROMPT_AGENTS only for that case.
+      const CLI_PROMPT_AGENTS: AgentId[] = [
+        'codex', 'claude-code', 'gemini', 'qwen-code',
+        ...(req.isCronJob ? (['opencode'] as AgentId[]) : []),
+      ];
       const sentViaCliArg = !!(
         initialPrompt &&
         !req.agentSessionId &&
         CLI_PROMPT_AGENTS.includes(req.agentId)
       );
       if (sentViaCliArg && initialPrompt) {
-        if (req.agentId === 'opencode') {
-          // `opencode run [model-flags] <message..>`
-          // The default positional is a project path — must use the `run` subcommand.
-          args = ['run', ...args, initialPrompt];
-        } else {
-          args = [...args, initialPrompt];
-        }
+        args = [...args, initialPrompt];
       }
 
       env = piLike.env;
@@ -922,9 +970,12 @@ function registerIpc(): void {
     // independently of whether the window is visible, the screen is locked, or
     // the renderer is suspended.
     const initialPromptForPty = req.initialPrompt?.trim();
-    // A sentViaCliArg flag is scoped to the non-pi branch; for pi we always
-    // fall through to the PTY-write path.  Re-derive it here.
-    const _cliAgents: AgentId[] = ['codex', 'claude-code', 'opencode', 'gemini', 'qwen-code'];
+    // Agents that receive their prompt via CLI arg (not PTY write).
+    // opencode in cron mode also uses CLI arg (`opencode run <prompt>`).
+    const _cliAgents: AgentId[] = [
+      'codex', 'claude-code', 'gemini', 'qwen-code',
+      ...(req.isCronJob ? (['opencode'] as AgentId[]) : []),
+    ];
     const needsPtyWrite =
       initialPromptForPty &&
       !req.agentSessionId &&
@@ -933,7 +984,7 @@ function registerIpc(): void {
       // Use bracketed-paste mode (XTerm "paste" protocol) so that newlines in
       // multi-line or markdown prompts are NOT interpreted as Enter keystrokes
       // by the agent's raw-mode terminal driver.  Modern interactive CLIs
-      // (pi, copilot, hermes, etc.) honour this protocol:
+      // (pi, copilot, opencode, hermes, etc.) honour this protocol:
       //   ESC[200~  <text with literal \n intact>  ESC[201~  CR
       //
       // We still strip dangerous C0 control chars OTHER than \n/\r that could
@@ -944,11 +995,13 @@ function registerIpc(): void {
         .replace(/ {2,}/g, ' ');                             // collapse multiple spaces
       const bracketedPayload = `\x1b[200~${sanitized}\x1b[201~\r`;
       const tabId = req.tabId;
-      // 3.5 s grace period — gives the agent time to print its startup UI
-      // and enter its interactive read loop before we feed it the prompt.
+      // Grace period before writing the prompt.
+      // opencode ships a 128 MB x86_64 native binary (runs via Rosetta 2 on
+      // arm64 Macs), so it needs a longer startup window than pure-JS agents.
+      const graceMs = req.agentId === 'opencode' ? 8000 : 3500;
       setTimeout(() => {
         ptys.get(tabId)?.write(bracketedPayload);
-      }, 3500);
+      }, graceMs);
     }
 
     pty.onData((data) => {
@@ -1033,14 +1086,52 @@ function registerIpc(): void {
   });
 
   // ── Power management ───────────────────────────────────────────────────────
+  // macOS: Electron's powerSaveBlocker('prevent-app-suspension') only registers
+  // a NoIdleSleepAssertion (PreventUserIdleSystemSleep), which prevents idle
+  // timeout sleep but NOT lid-close sleep.
+  //
+  // To prevent lid-close sleep on AC power we additionally spawn `caffeinate -si`:
+  //   -s  PreventSystemSleep assertion (blocks lid-close sleep when on AC power)
+  //   -i  PreventUserIdleSystemSleep   (redundant but harmless belt-and-suspenders)
+  //
+  // On battery power macOS will still allow sleep on lid-close — this is an
+  // OS-level policy that cannot be overridden by user-space without root/SIP bypass.
+  //
+  // Windows / Linux: powerSaveBlocker alone is sufficient.
+  const spawnCaffeinate = () => {
+    if (process.platform !== 'darwin' || caffeinateProc) return;
+    caffeinateProc = spawnChild('caffeinate', ['-si'], { stdio: 'ignore' });
+    caffeinateProc.on('exit', () => { caffeinateProc = null; });
+  };
+
+  // After any sleep/wake cycle macOS may have dropped our power assertion
+  // (caffeinate process killed by the kernel during suspend). Re-spawn if
+  // Keep Awake is still supposed to be active.
+  powerMonitor.on('resume', () => {
+    if (keepAwakeActive && !caffeinateProc) spawnCaffeinate();
+  });
+
+  // Heartbeat: `resume` only fires on full system suspend/wake, not on
+  // display-only sleep (pmset displaysleepnow). Poll every 30 s as a
+  // belt-and-suspenders guard against caffeinate exiting unexpectedly.
+  setInterval(() => {
+    if (keepAwakeActive && !caffeinateProc) spawnCaffeinate();
+  }, 30_000);
+
   ipcMain.handle(IPC.powerBlockerStart, () => {
-    // prevent-app-suspension: keeps system awake but allows display to sleep.
+    keepAwakeActive = true;
     const id = powerSaveBlocker.start('prevent-app-suspension');
+    spawnCaffeinate();
     return { id };
   });
   ipcMain.handle(IPC.powerBlockerStop, (_e, id: number) => {
+    keepAwakeActive = false;
     if (typeof id === 'number' && powerSaveBlocker.isStarted(id)) {
       powerSaveBlocker.stop(id);
+    }
+    if (caffeinateProc) {
+      caffeinateProc.kill();
+      caffeinateProc = null;
     }
   });
 
@@ -1429,6 +1520,7 @@ app.on('before-quit', () => {
   cronScheduler.destroy();
   localGatewayManager.close();
   killAllPtys();
+  if (caffeinateProc) { caffeinateProc.kill(); caffeinateProc = null; }
 });
 
 app.on('window-all-closed', () => {
