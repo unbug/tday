@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AgentHistoryEntry, AgentId, AgentInfo, CronJob, CronJobStats, ProvidersConfig } from '@tday/shared';
+import type { AgentHistoryEntry, AgentId, AgentInfo, CronJob, CronJobStats, CoWorker, ProvidersConfig } from '@tday/shared';
 import type { Section } from './Settings/types';
 import { SectionTab } from './Settings/shared';
 import { ProvidersSection } from './Settings/ProvidersSection';
@@ -7,6 +7,7 @@ import { AgentsSection } from './Settings/AgentsSection';
 import { UsageSection } from './Settings/UsageSection';
 import { HistorySection } from './Settings/HistorySection';
 import { CronSection } from './Settings/CronSection';
+import { CoWorkerSection } from './Settings/CoWorkerSection';
 import { describeCronExpr } from './Settings/cron-helpers';
 
 interface Props {
@@ -23,11 +24,12 @@ interface Props {
 }
 
 const TABS: { id: Section; label: string }[] = [
-  { id: 'usage',     label: 'Usage' },
-  { id: 'providers', label: 'Providers' },
-  { id: 'agents',    label: 'Agents' },
-  { id: 'cron',      label: 'Cron' },
-  { id: 'history',   label: 'History' },
+  { id: 'usage',      label: 'Usage' },
+  { id: 'providers',  label: 'Providers' },
+  { id: 'agents',     label: 'Agents' },
+  { id: 'cron',       label: 'CronJobs' },
+  { id: 'coworkers',  label: 'CoWorkers' },
+  { id: 'history',    label: 'History' },
 ];
 
 export function Settings({
@@ -52,7 +54,11 @@ export function Settings({
   const [cronEditId, setCronEditId] = useState<string | null>(null);
   const [cronDraft, setCronDraft] = useState<Partial<CronJob>>({});
   const [cronSaving, setCronSaving] = useState(false);
-  const [dialogSize, setDialogSize] = useState({ w: 880, h: 640 });
+  const [coworkers, setCoworkers] = useState<CoWorker[]>([]);
+  const [dialogSize, setDialogSize] = useState(() => ({
+    w: Math.min(1100, Math.round(window.innerWidth * 0.97)),
+    h: Math.min(740, Math.round(window.innerHeight * 0.93)),
+  }));
   const resizeStartRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
 
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
@@ -90,10 +96,11 @@ export function Settings({
     void window.tday.getAllSettings().then((s) => {
       setShared(s['tday:sharedAgentConfig'] === true);
     });
-    void Promise.all([window.tday.listCronJobs(), window.tday.getCronStats()]).then(
-      ([jobs, stats]) => {
+    void Promise.all([window.tday.listCronJobs(), window.tday.getCronStats(), window.tday.listCoworkers()]).then(
+      ([jobs, stats, cws]) => {
         setCronJobs(jobs);
         setCronStats(stats);
+        setCoworkers(cws);
       },
     );
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -116,8 +123,9 @@ export function Settings({
   }, []);
 
   const handleCronOpenNew = useCallback(() => {
+    const defaultAgent = (agents.find((a) => a.isDefault)?.id ?? agents[0]?.id ?? 'pi') as AgentId;
     setCronEditId('__new__');
-    setCronDraft({ agentId: (agents[0]?.id ?? '') as AgentId, schedule: '0 9 * * 1-5', enabled: true, cwd: home, prompt: '', name: '' });
+    setCronDraft({ agentId: defaultAgent, schedule: '0 9 * * 1-5', enabled: true, cwd: home, prompt: '', name: '' });
   }, [agents, home]);
 
   const handleCronOpenEdit = useCallback((job: CronJob) => {
@@ -197,15 +205,16 @@ export function Settings({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
+      className="no-drag fixed inset-0 z-50 overflow-y-auto"
       style={{ background: 'rgba(0,0,0,0.72)' }}
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
+      <div className="flex min-h-full items-center justify-center py-4">
       <div
         className="relative flex flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl"
-        style={{ width: dialogSize.w, height: dialogSize.h }}
+        style={{ width: dialogSize.w, height: dialogSize.h, maxWidth: 'calc(100vw - 2rem)', maxHeight: 'calc(100vh - 2rem)' }}
       >
-        <div className="relative z-10 flex shrink-0 items-center gap-1 border-b border-zinc-800/60 px-4 pb-0 pt-4">
+        <div className="relative z-10 flex shrink-0 items-end gap-0.5 border-b border-zinc-800/60 px-4 pb-0 pt-3">
           {TABS.map((t) => (
             <SectionTab key={t.id} active={section === t.id} onClick={() => changeSection(t.id)}>
               {t.label}
@@ -253,6 +262,7 @@ export function Settings({
               editId={cronEditId}
               draft={cronDraft}
               home={home}
+              coworkers={coworkers}
               onOpenNew={handleCronOpenNew}
               onOpenEdit={handleCronOpenEdit}
               onCloseEdit={handleCronCloseEdit}
@@ -265,6 +275,9 @@ export function Settings({
               onRefreshStats={refreshCronStats}
             />
           )}
+          {section === 'coworkers' && (
+            <CoWorkerSection coworkers={coworkers} onCoworkersChange={setCoworkers} />
+          )}
         </div>
 
         <div
@@ -272,6 +285,7 @@ export function Settings({
           className="absolute bottom-0 right-0 h-4 w-4 cursor-se-resize"
           style={{ background: 'linear-gradient(135deg, transparent 50%, rgba(255,255,255,0.1) 50%)' }}
         />
+      </div>
       </div>
     </div>
   );

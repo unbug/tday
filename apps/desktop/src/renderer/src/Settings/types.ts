@@ -1,4 +1,4 @@
-export type Section = 'providers' | 'agents' | 'usage' | 'history' | 'cron';
+export type Section = 'providers' | 'agents' | 'usage' | 'history' | 'cron' | 'coworkers';
 export type UsageDateMode = 'today' | '7d' | '30d' | '90d' | 'custom';
 
 export type SchedMode = 'interval' | 'at' | 'cron';

@@ -32,6 +32,7 @@ export interface TabsHook {
   onDragEnd: () => void;
   setLastCwd: (cwd: string) => void;
   updateTabSessionId: (tabId: string, sessionId: string | null) => void;
+  setTabCoworker: (id: string, coworkerId: string | undefined) => void;
   removeFromAgentHistory: (id: string) => void;
   initTabs: (persisted: PersistedTab[], savedActiveId: string | null, fallbackCwd: string, defaultAgentId: AgentId) => void;
   loadDeferredData: (logoHinted: boolean, keepAwake: boolean, onLogoHint: () => void, onKeepAwake: () => void) => void;
@@ -209,6 +210,10 @@ export function useTabs(home: string, defaultAgentId: AgentId): TabsHook {
     setAgentHistory((prev) => prev.filter((e) => e.id !== id));
   };
 
+  const setTabCoworker = (id: string, coworkerId: string | undefined) => {
+    setTabs((prev) => prev.map((t) => t.id === id ? { ...t, coworkerId } : t));
+  };
+
   // ── Drag-to-reorder ───────────────────────────────────────────────────────────
   const onDragStart = (id: string) => setDragId(id);
   const onDragOver = (e: React.DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; };
@@ -294,7 +299,7 @@ export function useTabs(home: string, defaultAgentId: AgentId): TabsHook {
     tabHistory, agentHistory, agentHistoryLoading,
     dragId,
     closeTab, addTab, restoreTab, restoreTabFromHistory, restoreFromAgentHistory,
-    setTabDraft, commitTabCwd, browseTabCwd, updateTabSessionId, removeFromAgentHistory,
+    setTabDraft, commitTabCwd, browseTabCwd, updateTabSessionId, setTabCoworker, removeFromAgentHistory,
     onDragStart, onDragOver, onDrop, onDragEnd,
     setLastCwd, initTabs, loadDeferredData,
   };

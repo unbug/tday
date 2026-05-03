@@ -1,4 +1,5 @@
-import type { AgentId, AgentInfo, CronJob, CronJobStats } from '@tday/shared';
+import { useState } from 'react';
+import type { AgentId, AgentInfo, CronJob, CronJobStats, CoWorker } from '@tday/shared';
 import { MiniMarkdown, Field } from './shared';
 import {
   CRON_AGENT_IDS,
@@ -8,11 +9,13 @@ import {
   fmtCronTime,
 } from './cron-helpers';
 import { ScheduleWidget } from './ScheduleWidget';
+import { PROMPT_TEMPLATES, TEMPLATE_CATEGORIES } from './cron-prompt-templates';
 
 export interface CronSectionProps {
   jobs: CronJob[];
   stats: Record<string, CronJobStats>;
   agents: AgentInfo[];
+  coworkers?: CoWorker[];
   saving: boolean;
   editId: string | null;
   draft: Partial<CronJob>;
@@ -33,6 +36,7 @@ export function CronSection({
   jobs,
   stats,
   agents,
+  coworkers = [],
   saving,
   editId,
   draft,
@@ -48,9 +52,17 @@ export function CronSection({
   onTrigger,
   onRefreshStats,
 }: CronSectionProps) {
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [templateCategory, setTemplateCategory] = useState(TEMPLATE_CATEGORIES[0]);
+
   const browseDir = async () => {
     const picked = await window.tday.pickDir(draft.cwd || home);
     if (picked) onDraftChange({ cwd: picked });
+  };
+
+  const applyTemplate = (tpl: typeof PROMPT_TEMPLATES[number]) => {
+    onDraftChange({ prompt: tpl.prompt, schedule: tpl.schedule, name: draft.name?.trim() ? draft.name : tpl.name });
+    setShowTemplates(false);
   };
 
   return (
@@ -148,6 +160,29 @@ export function CronSection({
               </select>
             </Field>
 
+            {coworkers.length > 0 && (
+              <Field label="CoWorker">
+                <select
+                  className="input"
+                  value={draft.coworkerId ?? ''}
+                  onChange={(e) => onDraftChange({ coworkerId: e.target.value || undefined })}
+                >
+                  <option value="">— None —</option>
+                  {coworkers.map((cw) => (
+                    <option key={cw.id} value={cw.id}>
+                      {cw.emoji} {cw.name}{cw.isBuiltIn ? '' : ' (custom)'}
+                    </option>
+                  ))}
+                </select>
+                {draft.coworkerId && (() => {
+                  const cw = coworkers.find((c) => c.id === draft.coworkerId);
+                  return cw ? (
+                    <p className="mt-1 text-[10px] text-zinc-500">{cw.description}</p>
+                  ) : null;
+                })()}
+              </Field>
+            )}
+
             <Field label="Working directory">
               <div className="flex gap-1.5">
                 <input
@@ -166,6 +201,58 @@ export function CronSection({
             </Field>
 
             <Field label="Prompt / Goal">
+              {/* Template picker toggle */}
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-[10px] text-zinc-600">Describe what the agent should do…</span>
+                <button
+                  onClick={() => setShowTemplates((v) => !v)}
+                  className="rounded px-2 py-0.5 text-[10px] text-fuchsia-400 hover:bg-fuchsia-500/10 transition-colors"
+                >
+                  {showTemplates ? '✕ Close templates' : '✦ Templates'}
+                </button>
+              </div>
+
+              {/* Template picker panel */}
+              {showTemplates && (
+                <div className="mb-2 rounded-lg border border-zinc-800 bg-zinc-950 overflow-hidden">
+                  {/* Category tabs */}
+                  <div className="flex gap-0.5 overflow-x-auto border-b border-zinc-800 px-2 pt-1.5 pb-0 scroll-themed">
+                    {TEMPLATE_CATEGORIES.map((cat) => (
+                      <button
+                        key={cat}
+                        onClick={() => setTemplateCategory(cat)}
+                        className={`shrink-0 rounded-t px-2.5 py-1 text-[10px] transition-colors whitespace-nowrap ${
+                          templateCategory === cat
+                            ? 'bg-zinc-800 text-zinc-100'
+                            : 'text-zinc-500 hover:text-zinc-300'
+                        }`}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                  {/* Template cards */}
+                  <div className="grid grid-cols-2 gap-1.5 p-2 max-h-52 overflow-y-auto scroll-themed">
+                    {PROMPT_TEMPLATES.filter((t) => t.category === templateCategory).map((tpl) => (
+                      <button
+                        key={tpl.id}
+                        onClick={() => applyTemplate(tpl)}
+                        className="group flex flex-col gap-0.5 rounded-md border border-zinc-800 bg-zinc-900 px-2.5 py-2 text-left transition-colors hover:border-fuchsia-500/40 hover:bg-zinc-800"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-base leading-none">{tpl.emoji}</span>
+                          <span className="text-[11px] font-medium text-zinc-200 group-hover:text-white">
+                            {tpl.title}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-zinc-500 leading-relaxed">{tpl.description}</p>
+                        <p className="mt-0.5 text-[9px] text-zinc-700 font-mono">{tpl.schedule}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <textarea
                 className="input min-h-[80px] resize-y"
                 placeholder="Describe what the agent should do…"
@@ -225,8 +312,7 @@ export function CronSection({
         ) : (
           /* ── Stats dashboard ── */
           <div>
-            <div className="mb-3 flex items-center justify-between">
-              <div className="text-sm font-medium text-zinc-100">Cron Jobs Dashboard</div>
+            <div className="mb-3 flex items-center justify-end">
               <button
                 onClick={() => void onRefreshStats()}
                 className="rounded-md border border-zinc-700 px-2.5 py-1 text-[11px] text-zinc-400 hover:bg-zinc-800"

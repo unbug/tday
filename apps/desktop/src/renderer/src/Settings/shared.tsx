@@ -26,10 +26,10 @@ export function SectionTab({
   return (
     <button
       onClick={onClick}
-      className={`rounded-md px-3 py-2 text-xs font-medium transition-colors ${
+      className={`rounded-t px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${
         active
           ? 'bg-zinc-800 text-zinc-100'
-          : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+          : 'text-zinc-500 hover:text-zinc-300'
       }`}
     >
       {children}

@@ -192,8 +192,9 @@ A **Tab** owns one **Session** = one PTY process bound to one agent adapter, one
 | ~~**v0.3.x**~~ ✅ | Multi-agent UI overhaul + Tab History | 9 agent adapters (Crush, Hermes, Qwen-Code added). Per-agent accent colors. Logo dropdown (History, Keep Awake, Usage, Settings). Closed-tab history with one-click restore. Agent-native session resume (claude-code `--resume`, codex `resume`, opencode `--session`). Conversation history replayed on restore. Windows PATH augmentation (nvm-windows, volta, fnm). |
 | ~~**v0.4.x**~~ ✅ | Local-inference + UX Polish | Local service discovery (Ollama, LM Studio, vLLM, llama.cpp, SGLang). Usage analytics dashboard (SQLite store, 30+ model pricing, summary cards, daily chart, by-model/agent tables). Settings redesign: History tab, resizable dialog, lazy-mount. Tab title smart clip + hover tooltip, last-active restore on restart. In-app update checker with green-dot badge. claude-code width + double-SIGWINCH fix. Windows menu fix. Electron drag-region fix. |
 | ~~**v0.5.x**~~ ✅ | Cron & Automation | **Settings → Cron** tab: job list with enable/clone/delete, ScheduleWidget (Interval / At time / Custom cron with datetime picker), human-readable schedule preview. Cron scheduler in main process (node-cron, persistent JSON store, per-job stats). `initialPrompt` delivered reliably at spawn time: CLI positional arg for codex / claude-code / opencode / gemini / qwen-code; bracketed-paste PTY write (XTerm `ESC[200~`) for pi / copilot / hermes / crush — works even when screen is locked. OpenCode `run` subcommand fix. Job dashboard with next-run countdown, run count, last-status. |
-| **v0.6.0** 🔄 | Token usage analytics (extended) | Per-tab usage mini-badge. Adapter `parseUsage()` hooks. CSV/JSON export. Budget alerts. |
-| **v0.7.0** | MCP Management | MCP server registry in Settings (add/edit/remove, stdio & SSE transports). Auto-discover running local MCP processes. Per-agent MCP binding. Bundled quick-add servers: filesystem, memory, fetch, git. |
+| ~~**v0.6.0**~~ ✅ | Token usage analytics | Dashboard UI: summary cards, daily bar chart, by-model and by-agent breakdown (SQLite store, 30+ model pricing). |
+| ~~**v0.6.x**~~ ✅ | CoWorker system | **Settings → CoWorkers** tab: create/edit/delete role personas injected as system prompts. Three source types: built-in (`builtin:*` from AGENT.md), online (`online:*` URL-cached from GitHub), custom (inline text / local file / URL). Three curated presets (Karpathy Code Guidelines, Devin-style Planner, Earnings Call Analyst). CoWorker dropdown in CwdBar — select per tab, prompt injected immediately into the running PTY. CoWorker binding in Cron jobs. Settings dialog tabs now top-tab style; backdrop `no-drag` fix so tabs are always clickable even when TabBar wraps to multiple rows. |
+| **v0.7.0** 🔄 🔄 | MCP Management | MCP server registry in Settings (add/edit/remove, stdio & SSE transports). Auto-discover running local MCP processes. Per-agent MCP binding. Bundled quick-add servers: filesystem, memory, fetch, git. |
 | **v0.7.1** | Channels Management | Named I/O channels in Settings: pipe agent stdout to files, webhooks, or other agents. Fan-out (broadcast one agent's output to multiple sinks). Fan-in (merge streams from multiple agents into one tab). Channel editor with live preview. |
 | **v0.7.2** | Custom Agents | `AgentAdapter` public package. Register third-party agents via manifest URL or local path. Agents tab shows community adapters with one-click install. Custom system-prompt per agent. |
 | **v0.8.0** | Browser & Computer Use | `browser-use` agent adapter (Python). Playwright MCP server quick-add. Anthropic computer-use mode toggle (bash / screenshot / text-editor tools). Screenshot side-panel in tab. |
@@ -321,13 +322,27 @@ The acceptance criterion: **`npm run dev` opens a window with one tab running th
 - [x] Clone cron job (Copy of X, enabled:false, opens in editor)
 - [x] Cron UI theme: `datetime-local` input uses `input-date` class (dark `color-scheme` + fuchsia calendar icon)
 
-### v0.6.0 — Token usage analytics (extended)
+### v0.6.0 — Token usage analytics ✅
 - [x] Dashboard UI: summary cards, daily chart, by-model and by-agent breakdown
 - [ ] Per-tab usage mini-badge (tokens / estimated cost)
 - [ ] Adapter `parseUsage()` hooks scraping token counts from agent output
 - [ ] Live cost estimation using pricing table
 - [ ] CSV / JSON export
 - [ ] Budget alerts (configurable per-agent / global cap)
+
+### ~~v0.6.x — CoWorker system~~ ✅
+- [x] **CoWorker data model** — three kinds: `builtin:*` (AGENT.md), `online:*` (URL-cached from GitHub), `custom:*` (inline / file / URL)
+- [x] **Settings → CoWorkers** tab — full CRUD: create, edit, delete, preview system prompt
+- [x] **Three curated presets** (non-deletable, English names):
+  - [x] 🧠 Karpathy Code Guidelines (`online:karpathy`)
+  - [x] 🤖 Devin-style Planner (`online:devin-planner`)
+  - [x] 📈 Earnings Call Analyst (`online:earnings-analyst`)
+- [x] **CoWorker dropdown in CwdBar** — per-tab single-select; selecting a CoWorker immediately writes its system prompt into the running PTY (`window.tday.write`)
+- [x] **CoWorker binding in Cron jobs** — system prompt prepended to task prompt at spawn (`buildEffectivePrompt`)
+- [x] **CoWorker binding at spawn** — `coworkerId` on `SpawnRequest`; main process calls `buildEffectivePrompt` before PTY launch
+- [x] Settings tab bar: top-tab style (`rounded-t`) replacing pill-style tabs
+- [x] Settings dialog backdrop: `no-drag` fix — tabs always clickable even when TabBar wraps to multiple rows
+- [x] Settings dialog: lazy `dialogSize` init capped to viewport + `overflow-y-auto` so tabs are never pushed above visible area
 
 ### v0.7.0 — MCP Management
 MCP (Model Context Protocol) lets agents use tools, access resources, and receive prompts from external servers. Tday becomes the central registry for all MCP connections — configure once, available everywhere.

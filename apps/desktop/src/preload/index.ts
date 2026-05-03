@@ -21,6 +21,7 @@ import {
   type CronJob,
   type CronJobStats,
   type CronFireEvent,
+  type CoWorker,
 } from '@tday/shared';
 
 const api = {
@@ -28,6 +29,8 @@ const api = {
   homeDir: () => ipcRenderer.invoke(IPC.homeDir) as Promise<string>,
   pickDir: (defaultPath?: string) =>
     ipcRenderer.invoke(IPC.pickDir, defaultPath) as Promise<string | null>,
+  pickFile: (opts?: { filters?: { name: string; extensions: string[] }[]; defaultPath?: string }) =>
+    ipcRenderer.invoke(IPC.pickFile, opts) as Promise<string | null>,
   listAgents: () => ipcRenderer.invoke(IPC.agentsList),
   saveAgents: (cfg: AgentsConfig) => ipcRenderer.invoke(IPC.agentsSave, cfg),
   listProviders: () => ipcRenderer.invoke(IPC.providersList),
@@ -124,6 +127,19 @@ const api = {
     ipcRenderer.on(IPC.cronJobFired, fn);
     return () => ipcRenderer.off(IPC.cronJobFired, fn);
   },
+  // ── CoWorker management ───────────────────────────────────────────────────────
+  listCoworkers: () =>
+    ipcRenderer.invoke(IPC.coworkerList) as Promise<CoWorker[]>,
+  saveCoworker: (coworker: CoWorker) =>
+    ipcRenderer.invoke(IPC.coworkerSave, coworker) as Promise<void>,
+  deleteCoworker: (id: string) =>
+    ipcRenderer.invoke(IPC.coworkerDelete, id) as Promise<void>,
+  resetCoworker: (id: string) =>
+    ipcRenderer.invoke(IPC.coworkerReset, id) as Promise<void>,
+  fetchCoworkerUrl: (url: string) =>
+    ipcRenderer.invoke(IPC.coworkerFetchUrl, url) as Promise<string>,
+  refreshCoworkerCache: (id: string) =>
+    ipcRenderer.invoke(IPC.coworkerRefreshCache, id) as Promise<void>,
 };
 
 contextBridge.exposeInMainWorld('tday', api);

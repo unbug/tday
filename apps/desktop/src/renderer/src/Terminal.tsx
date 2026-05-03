@@ -26,12 +26,14 @@ interface Props {
   initialPrompt?: string;
   /** True when opened by the cron scheduler — agents use batch/non-interactive mode. */
   isCronJob?: boolean;
+  /** CoWorker id to apply — system prompt is prepended to initialPrompt at spawn. */
+  coworkerId?: string;
 }
 
 // Agents that support native session resume.
 const RESUME_CAPABLE: AgentId[] = ['claude-code', 'codex', 'opencode'];
 
-export function Terminal({ tabId, agentId, cwd, active, agentSessionId, onAgentSessionId, initialPrompt, isCronJob }: Props) {
+export function Terminal({ tabId, agentId, cwd, active, agentSessionId, onAgentSessionId, initialPrompt, isCronJob, coworkerId }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const spawnedRef = useRef(false);
   const termRef = useRef<XTerm | null>(null);
@@ -157,6 +159,7 @@ export function Terminal({ tabId, agentId, cwd, active, agentSessionId, onAgentS
           // reliable even when the screen is locked.
           initialPrompt: initialPrompt || undefined,
           isCronJob: isCronJob || undefined,
+          coworkerId: coworkerId || undefined,
         })
         .catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);

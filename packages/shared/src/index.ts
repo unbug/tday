@@ -112,6 +112,8 @@ export interface SpawnRequest {
    * Agents without a dedicated batch mode are unaffected.
    */
   isCronJob?: boolean;
+  /** Optional CoWorker id — its system prompt is prepended to `initialPrompt` at spawn. */
+  coworkerId?: string;
 }
 
 /**
@@ -220,6 +222,41 @@ export interface AgentHistoryFilter {
 
 // ─── CronJob types ────────────────────────────────────────────────────────────
 
+// ─── CoWorker types ──────────────────────────────────────────────────────────
+
+/**
+ * A CoWorker is a reusable role persona injected as a system prompt before
+ * the agent's task prompt. It encodes specialist skills, workflows, and quality
+ * gates for a specific engineering discipline (QA, Security, DevOps, …).
+ */
+/** Discriminates the three storage/behaviour variants of a CoWorker. */
+export type CoWorkerKind = 'builtin' | 'online' | 'custom';
+
+export interface CoWorker {
+  id: string;           // 'builtin:*' | 'online:*' | 'custom:*'
+  kind?: CoWorkerKind;  // derived from id prefix when not set
+  name: string;
+  emoji: string;
+  description: string;
+  /** Inline Markdown system prompt (custom text source or built-in fallback). */
+  systemPrompt: string;
+  /** custom/file: absolute path to a local .md file read at runtime. */
+  promptFile?: string;
+  /** online/custom-url: GitHub URL (blob or raw). Content is cached locally. */
+  url?: string;
+  /** Runtime-only: cached markdown fetched from `url`. Never persisted to settings store. */
+  cachedContent?: string;
+  /** Epoch ms of last successful URL cache refresh (derived from cache file mtime). */
+  cachedAt?: number;
+  /** True for built-in presets. Editing creates a user override in ~/.tday/coworkers/. */
+  isBuiltIn?: boolean;
+  /** True for preset online coworkers shipped with the app. Cannot be deleted. */
+  isPreset?: boolean;
+  /** True when the user has saved a local override for a built-in preset. */
+  hasUserOverride?: boolean;
+  createdAt?: number;
+}
+
 /**
  * A scheduled automation job that opens a new agent tab at a defined cron schedule.
  * Uses standard 5-field cron syntax: "min hour dom month dow"
@@ -236,6 +273,8 @@ export interface CronJob {
   schedule: string;
   enabled: boolean;
   createdAt: number;
+  /** Optional CoWorker id — its systemPrompt is prepended to `prompt` at launch. */
+  coworkerId?: string;
 }
 
 /** Runtime statistics for a CronJob — stored separately so the job config stays clean. */
@@ -274,6 +313,7 @@ export const IPC = {
   agentInstallProgress: 'agent:install:progress',
   homeDir: 'app:home-dir', // renderer -> main: get HOME path
   pickDir: 'app:pick-dir', // renderer -> main: open folder picker
+  pickFile: 'app:pick-file', // renderer -> main: open file picker (returns path | null)
   // Local service discovery
   discoverServices: 'discovery:scan',
   probeUrl: 'discovery:probe-url',
@@ -304,6 +344,13 @@ export const IPC = {
   cronJobsTrigger: 'cron:trigger',
   cronJobsGetStats: 'cron:stats',
   cronJobFired: 'cron:fired', // main -> renderer
+  // CoWorker management
+  coworkerList: 'coworker:list',
+  coworkerSave: 'coworker:save',
+  coworkerDelete: 'coworker:delete',
+  coworkerReset: 'coworker:reset',         // reset user override back to preset
+  coworkerFetchUrl: 'coworker:fetch-url',   // preview: fetch raw content from a URL
+  coworkerRefreshCache: 'coworker:refresh-cache', // refresh cached content for online/url coworker
 } as const;
 
 // ─── Discovery types ──────────────────────────────────────────────────────────

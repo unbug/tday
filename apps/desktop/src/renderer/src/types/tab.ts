@@ -19,6 +19,8 @@ export interface Tab {
   initialPrompt?: string;
   /** True when opened by the cron scheduler — agents use batch/non-interactive mode. */
   isCronJob?: boolean;
+  /** CoWorker id to apply — its system prompt is prepended to the agent's initial prompt. */
+  coworkerId?: string;
 }
 
 /** Persisted tab record. Epoch is intentionally dropped — every restored

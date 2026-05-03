@@ -1,14 +1,17 @@
+import type { CoWorker } from '@tday/shared';
 import type { Tab } from '../types/tab';
 
 interface CwdBarProps {
   activeTab: Tab | undefined;
   home: string;
+  coworkers?: CoWorker[];
   onSetTabDraft: (id: string, cwd: string) => void;
   onCommitTabCwd: (id: string, cwd: string) => void;
   onBrowseTabCwd: (id: string, current: string) => void;
+  onSetTabCoworker?: (id: string, coworkerId: string | undefined) => void;
 }
 
-export function CwdBar({ activeTab, home, onSetTabDraft, onCommitTabCwd, onBrowseTabCwd }: CwdBarProps) {
+export function CwdBar({ activeTab, home, coworkers = [], onSetTabDraft, onCommitTabCwd, onBrowseTabCwd, onSetTabCoworker }: CwdBarProps) {
   if (!activeTab) return null;
 
   const homeShort = (p: string) => (home && p.startsWith(home) ? '~' + p.slice(home.length) : p);
@@ -49,6 +52,22 @@ export function CwdBar({ activeTab, home, onSetTabDraft, onCommitTabCwd, onBrows
       >
         Browse…
       </button>
+      {coworkers.length > 0 && onSetTabCoworker && (
+        <>
+          <div className="h-3 w-px bg-zinc-700/60" />
+          <select
+            className="cursor-pointer border-none bg-transparent text-[11px] text-zinc-400 outline-none hover:text-zinc-200"
+            value={activeTab.coworkerId ?? ''}
+            title="CoWorker"
+            onChange={(e) => onSetTabCoworker(activeTab.id, e.target.value || undefined)}
+          >
+            <option value="">CoWorker: None</option>
+            {coworkers.map((cw) => (
+              <option key={cw.id} value={cw.id}>{cw.emoji} {cw.name}</option>
+            ))}
+          </select>
+        </>
+      )}
     </div>
   );
 }

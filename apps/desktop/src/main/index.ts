@@ -44,6 +44,7 @@ import {
 } from './agent-history/index.js';
 import { getAllSettings, setSetting, type JsonValue } from './settings-store.js';
 import { loadCronJobs, saveCronJobs, loadCronStats, CronScheduler } from './cron.js';
+import { listAllCoworkers, upsertCoworker, deleteCoworker, resetBuiltinCoworker, buildEffectivePrompt, normalizeGitHubUrl, refreshCoworkerUrlCache, scheduleBackgroundRefresh, resolveCoworker } from './coworker.js';
 
 // Modular utilities
 import { PiAdapter } from '@tday/adapter-pi';
@@ -76,7 +77,8 @@ function fireCronJob(job: CronJob): void {
     jobId: job.id,
     agentId: job.agentId,
     cwd: job.cwd,
-    prompt: job.prompt,
+    // Prepend CoWorker system prompt if one is assigned to this job.
+    prompt: buildEffectivePrompt(job.coworkerId, job.prompt),
     name: job.name,
   };
 
@@ -108,6 +110,17 @@ function registerIpc(): void {
     const res = await dialog.showOpenDialog(win!, {
       properties: ['openDirectory', 'createDirectory'],
       defaultPath: defaultPath || homedir(),
+    });
+    if (res.canceled || res.filePaths.length === 0) return null;
+    return res.filePaths[0];
+  });
+
+  ipcMain.handle(IPC.pickFile, async (event, opts?: { filters?: { name: string; extensions: string[] }[]; defaultPath?: string }) => {
+    const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+    const res = await dialog.showOpenDialog(win!, {
+      properties: ['openFile'],
+      filters: opts?.filters ?? [{ name: 'Markdown', extensions: ['md', 'txt'] }],
+      defaultPath: opts?.defaultPath || homedir(),
     });
     if (res.canceled || res.filePaths.length === 0) return null;
     return res.filePaths[0];
@@ -166,6 +179,11 @@ function registerIpc(): void {
     const provider = providers.profiles.find((p) => p.id === providerId) ?? providers.profiles[0];
     const effectiveProvider =
       provider && agentConf.model ? { ...provider, model: agentConf.model } : provider;
+
+    // Apply CoWorker system prompt if one is selected for this tab
+    if (req.coworkerId) {
+      req = { ...req, initialPrompt: buildEffectivePrompt(req.coworkerId, req.initialPrompt ?? '') };
+    }
 
     const cwd = normalizeLaunchCwd(req.cwd);
     const baseEnv = { ...process.env };
@@ -384,12 +402,32 @@ function registerIpc(): void {
     cronScheduler.triggerNow(job);
   });
   ipcMain.handle(IPC.cronJobsGetStats, (): Record<string, CronJobStats> => loadCronStats());
+
+  // ── CoWorker management ───────────────────────────────────────────────────
+  ipcMain.handle(IPC.coworkerList, () => listAllCoworkers());
+  ipcMain.handle(IPC.coworkerSave, (_e, coworker: import('@tday/shared').CoWorker) => upsertCoworker(coworker));
+  ipcMain.handle(IPC.coworkerDelete, (_e, id: string) => deleteCoworker(id));
+  ipcMain.handle(IPC.coworkerReset, (_e, id: string) => resetBuiltinCoworker(id));
+  ipcMain.handle(IPC.coworkerFetchUrl, async (_e, rawUrl: string): Promise<string> => {
+    const url = normalizeGitHubUrl(rawUrl.trim());
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`);
+    return res.text();
+  });
+  ipcMain.handle(IPC.coworkerRefreshCache, async (_e, id: string): Promise<void> => {
+    const cw = resolveCoworker(id);
+    if (!cw?.url) throw new Error(`CoWorker "${id}" has no URL configured`);
+    await refreshCoworkerUrlCache(id, cw.url);
+  });
 }
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 
 app.whenReady().then(() => {
   augmentPath();
+
+  // Start background refresh for online coworker caches
+  scheduleBackgroundRefresh();
 
   if (process.platform === 'win32') {
     const nodeOk = Boolean(

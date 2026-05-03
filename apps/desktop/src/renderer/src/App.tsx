@@ -1,5 +1,5 @@
 import { startTransition, useEffect, useState } from 'react';
-import type { AgentId, AgentInfo } from '@tday/shared';
+import type { AgentId, AgentInfo, CoWorker } from '@tday/shared';
 import { Terminal } from './Terminal';
 import { Settings } from './Settings';
 import { TabBar } from './components/TabBar';
@@ -21,11 +21,12 @@ declare global {
   const __APP_VERSION__: string;
 }
 
-type SettingsSection = 'providers' | 'agents' | 'usage' | 'history' | 'cron';
+type SettingsSection = 'providers' | 'agents' | 'usage' | 'history' | 'cron' | 'coworkers';
 
 export default function App() {
   const [home, setHome] = useState<string>('~');
   const [agentList, setAgentList] = useState<AgentInfo[]>([]);
+  const [coworkers, setCoworkers] = useState<CoWorker[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('usage');
   const [settingsMounted, setSettingsMounted] = useState(false);
@@ -44,7 +45,7 @@ export default function App() {
     tabHistory, agentHistory, agentHistoryLoading,
     dragId,
     closeTab, addTab, restoreFromAgentHistory, updateTabSessionId, removeFromAgentHistory,
-    setTabDraft, commitTabCwd, browseTabCwd,
+    setTabDraft, commitTabCwd, browseTabCwd, setTabCoworker,
     onDragStart, onDragOver, onDrop, onDragEnd,
     setLastCwd, initTabs, loadDeferredData,
   } = useTabs(home, defaultAgentId);
@@ -63,6 +64,7 @@ export default function App() {
       ]);
       setHome(h);
       setAgentList(list);
+      void window.tday.listCoworkers().then(setCoworkers);
 
       const initialCwd =
         typeof settings[LAST_CWD_KEY] === 'string' ? (settings[LAST_CWD_KEY] as string) : h;
@@ -95,6 +97,18 @@ export default function App() {
   }, []);
 
   const activeTab = tabs.find((t) => t.id === activeId);
+
+  // Apply CoWorker immediately to the running PTY when the user selects one from CwdBar.
+  const handleSetTabCoworker = (tabId: string, coworkerId: string | undefined) => {
+    setTabCoworker(tabId, coworkerId);
+    if (!coworkerId) return;
+    const cw = coworkers.find((c) => c.id === coworkerId);
+    if (!cw) return;
+    // Prefer fetched URL cache content, fall back to inline systemPrompt
+    const content = (cw.cachedContent || cw.systemPrompt || '').trim();
+    if (!content) return;
+    void window.tday.write(tabId, content + '\r');
+  };
 
   return (
     <div className="relative flex h-full w-full flex-col bg-[#0a0a0f]">
@@ -149,9 +163,11 @@ export default function App() {
         <CwdBar
           activeTab={activeTab}
           home={home}
+          coworkers={coworkers}
           onSetTabDraft={setTabDraft}
           onCommitTabCwd={commitTabCwd}
           onBrowseTabCwd={browseTabCwd}
+          onSetTabCoworker={handleSetTabCoworker}
         />
 
         <div className="border-beam relative flex-1 overflow-hidden rounded-xl bg-black">
@@ -182,6 +198,7 @@ export default function App() {
                     agentSessionId={t.agentSessionId}
                     initialPrompt={t.initialPrompt}
                     isCronJob={t.isCronJob}
+                    coworkerId={t.coworkerId}
                     onAgentSessionId={(id) => updateTabSessionId(t.id, id)}
                   />
                 )}
