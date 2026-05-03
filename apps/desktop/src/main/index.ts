@@ -1,30 +1,17 @@
-import { app, BrowserWindow, ipcMain, shell, dialog, Menu, powerSaveBlocker, powerMonitor } from 'electron';
-import { isAbsolute, join } from 'node:path';
-import { electronApp, optimizer, is } from '@electron-toolkit/utils';
-import { spawn as spawnPty, type IPty } from 'node-pty';
-import { spawn as spawnChild, execFileSync } from 'node:child_process';
-import {
-  readFileSync,
-  existsSync,
-  mkdirSync,
-  writeFileSync,
-  readdirSync,
-  chmodSync,
-  createWriteStream,
-  statSync,
-} from 'node:fs';
-import { homedir, arch as osArch } from 'node:os';
-import { request as httpsRequest } from 'node:https';
+import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
+import { electronApp } from '@electron-toolkit/utils';
+import { spawn as spawnPty } from 'node-pty';
+import { spawn as spawnChild } from 'node:child_process';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 
-import { PiAdapter } from '@tday/adapter-pi';
 import {
   IPC,
   type AgentId,
   type AgentInfo,
-  type AgentInstallEvent,
   type AgentInstallSpec,
   type AgentsConfig,
-  type ProviderProfile,
   type ProvidersConfig,
   type SpawnRequest,
   type UsageRecord,
@@ -32,7 +19,9 @@ import {
   type AgentHistoryEntry,
   type AgentHistoryFilter,
 } from '@tday/shared';
-import { createLocalGatewayManager } from './gateway';
+import type { CronJob, CronFireEvent, CronJobStats } from '@tday/shared';
+
+import { createLocalGatewayManager } from './gateway/index.js';
 import { discoverLocalServices } from './discovery/index.js';
 import { probeBaseUrl } from './discovery/probe.js';
 import { appendUsage, loadUsageRecords, computeUsageSummary } from './usage/store.js';
@@ -54,38 +43,34 @@ import {
   mergeTabEntry,
 } from './agent-history/index.js';
 import { getAllSettings, setSetting, type JsonValue } from './settings-store.js';
-import {
-  loadCronJobs,
-  saveCronJobs,
-  loadCronStats,
-  updateJobStats,
-  CronScheduler,
-} from './cron.js';
-import type { CronJob, CronFireEvent } from '@tday/shared';
+import { loadCronJobs, saveCronJobs, loadCronStats, CronScheduler } from './cron.js';
 
-const TDAY_DIR = join(homedir(), '.tday');
+// Modular utilities
+import { PiAdapter } from '@tday/adapter-pi';
+import { PATH_SEP, augmentPath } from './path-utils.js';
+import { normalizeProvidersConfig, appendNoProxy } from './provider-utils.js';
+import { TDAY_DIR, loadAgents, loadProviders, initDefaultConfigs } from './config.js';
+import {
+  semverAtLeast,
+  INSTALL_SPECS,
+  detectGeneric,
+  resolveExecutable,
+  normalizeLaunchCwd,
+  modelFlagsFor,
+} from './agent-utils.js';
+import { ensureFd } from './fd-install.js';
+import { ptys, shuttingDown, setShuttingDown, killAllPtys } from './pty-manager.js';
+import { runNpmGlobal } from './npm-installer.js';
+import { setupPowerMonitor, registerPowerHandlers, stopCaffeinate } from './power-manager.js';
+import { createWindow, watchWindowShortcuts, installAppMenu, mainWindow } from './window.js';
+
 const localGatewayManager = createLocalGatewayManager();
 
-// ── CronJob scheduler (module-level singleton) ────────────────────────────────
-// Fires before `registerIpc` so the callback can reference `mainWindow`.
-// The actual `cronScheduler` is created after the BrowserWindow exists.
-let mainWindow: BrowserWindow | null = null;
-
-/**
- * Returns true if semver string `v` is >= `major.minor.patch`.
- * Accepts formats like "0.128.0", "v0.128.0", "0.128.0-beta.1".
- */
-function semverAtLeast(v: string, major: number, minor: number, patch: number): boolean {
-  const m = v.replace(/^v/, '').match(/^(\d+)\.(\d+)\.(\d+)/);
-  if (!m) return false;
-  const [, ma, mi, pa] = m.map(Number);
-  if (ma !== major) return ma > major;
-  if (mi !== minor) return mi > minor;
-  return pa >= patch;
-}
+// ── CronJob scheduler ─────────────────────────────────────────────────────────
 
 function fireCronJob(job: CronJob): void {
-  if (!mainWindow || mainWindow.isDestroyed() || shuttingDown) return;
+  const win = mainWindow;
+  if (!win || win.isDestroyed() || shuttingDown) return;
   const event: CronFireEvent = {
     jobId: job.id,
     agentId: job.agentId,
@@ -94,8 +79,6 @@ function fireCronJob(job: CronJob): void {
     name: job.name,
   };
 
-  // For codex cron jobs: always enable the /goal feature (requires >= v0.128.0)
-  // and auto-prepend `/goal` to the prompt so users don't have to type it.
   if (job.agentId === 'codex') {
     try {
       const det = detectGeneric('codex');
@@ -103,620 +86,18 @@ function fireCronJob(job: CronJob): void {
         spawnChild('codex', ['features', 'enable', 'goals'], {
           stdio: 'ignore',
           env: { ...process.env },
-        }).on('error', () => { /* ignore — best-effort */ });
+        }).on('error', () => { /* ignore */ });
         if (event.prompt) event.prompt = `/goal ${event.prompt}`;
       }
-      // version < 0.128.0: fire without /goal; user can upgrade codex.
     } catch { /* ignore */ }
   }
 
-  mainWindow.webContents.send(IPC.cronJobFired, event);
+  win.webContents.send(IPC.cronJobFired, event);
 }
 
 const cronScheduler = new CronScheduler(fireCronJob);
 
-/**
- * Augment process.env.PATH with common locations where Node toolchains live.
- *
- * macOS: GUI apps launched from Finder inherit a minimal PATH that misses
- * Homebrew, nvm, and the npm global prefix.
- * Windows: The Electron process may not inherit the full user PATH if started
- * from an icon shortcut, and npm/node global paths need explicit addition.
- *
- * We fix this so child_process and node-pty inherit a useful PATH.
- */
-const PATH_SEP = process.platform === 'win32' ? ';' : ':';
-
-function augmentPath(): void {
-  const home = homedir();
-  const extras: string[] = [];
-
-  if (process.platform === 'win32') {
-    // Windows: add common node/npm/scoop/fnm global locations
-    const appData = process.env.APPDATA ?? join(home, 'AppData', 'Roaming');
-    const localAppData = process.env.LOCALAPPDATA ?? join(home, 'AppData', 'Local');
-    extras.push(
-      join(appData, 'npm'),                          // npm global bin
-      join(home, 'scoop', 'shims'),                  // Scoop
-      join(localAppData, 'Microsoft', 'WinGet', 'Packages'),
-      join(home, '.cargo', 'bin'),                   // Rust/cargo
-      join(home, '.bun', 'bin'),                     // Bun
-      join(localAppData, 'fnm_multishells'),          // fnm (Node version manager)
-      'C:\\Program Files\\nodejs',                   // standard Node.js install
-      'C:\\Program Files (x86)\\nodejs',
-    );
-    // volta
-    extras.push(join(home, '.volta', 'bin'));
-    // fnm: pick the active node version
-    try {
-      const fnmDir = join(localAppData, 'fnm', 'node-versions');
-      if (existsSync(fnmDir)) {
-        const versions = readdirSync(fnmDir).sort().reverse();
-        if (versions[0]) extras.unshift(join(fnmDir, versions[0], 'installation'));
-      }
-    } catch { /* ignore */ }
-    // nvm-windows: active version via env vars or version dirs
-    try {
-      const nvmHome = process.env.NVM_HOME ?? join(appData, 'nvm');
-      const nvmSymlink = process.env.NVM_SYMLINK;
-      if (nvmSymlink && existsSync(nvmSymlink)) {
-        extras.unshift(nvmSymlink);
-      } else if (existsSync(nvmHome)) {
-        const nvmVersions = readdirSync(nvmHome).filter((v) => /^v?\d/.test(v)).sort().reverse();
-        if (nvmVersions[0]) extras.unshift(join(nvmHome, nvmVersions[0]));
-      }
-    } catch { /* ignore */ }
-  } else {
-    // macOS / Linux
-    extras.push(
-      '/opt/homebrew/bin',
-      '/opt/homebrew/sbin',
-      '/usr/local/bin',
-      '/usr/local/sbin',
-      join(home, '.npm-global', 'bin'),
-      join(home, '.local', 'bin'),
-      join(home, '.bun', 'bin'),
-      join(home, '.cargo', 'bin'),
-    );
-    // nvm: pick the highest-numbered installed node
-    try {
-      const nvmDir = join(home, '.nvm', 'versions', 'node');
-      if (existsSync(nvmDir)) {
-        const versions = readdirSync(nvmDir).sort().reverse();
-        if (versions[0]) extras.unshift(join(nvmDir, versions[0], 'bin'));
-      }
-    } catch { /* ignore */ }
-  }
-
-  // npm global prefix detection: find npm dynamically first, then fall back to
-  // hardcoded candidates. Dynamic discovery handles nvm-windows, volta, fnm, etc.
-  const isWin = process.platform === 'win32';
-  const npmCandidates: string[] = isWin
-    ? [join('C:\\Program Files\\nodejs', 'npm.cmd'), join(process.env.APPDATA ?? '', 'npm', 'npm.cmd')]
-    : ['/opt/homebrew/bin/npm', '/usr/local/bin/npm'];
-  try {
-    // Use where/which with the inherited PATH (before our augmentation) to find
-    // whatever npm the user's shell normally uses — this works for nvm-windows,
-    // volta, fnm, and any other version manager that writes to PATH.
-    const whichCmd = isWin ? 'where' : 'which';
-    const found = execFileSync(whichCmd, [isWin ? 'npm.cmd' : 'npm'], {
-      encoding: 'utf8',
-      timeout: 3_000,
-    }).split(/\r?\n/)[0].trim();
-    if (found) npmCandidates.unshift(found);
-  } catch { /* npm not on current PATH; fall through to hardcoded candidates */ }
-  for (const npmBin of npmCandidates) {
-    if (npmBin && existsSync(npmBin)) {
-      try {
-        const prefix = execFileSync(npmBin, ['config', 'get', 'prefix'], {
-          encoding: 'utf8',
-          timeout: 3_000,
-        }).trim();
-        if (prefix) {
-          extras.push(isWin ? prefix : join(prefix, 'bin'));
-        }
-      } catch { /* ignore */ }
-      break;
-    }
-  }
-
-  const current = process.env.PATH ?? '';
-  const seen = new Set(current.split(PATH_SEP).filter(Boolean));
-  for (const e of extras) if (existsSync(e)) seen.add(e);
-  process.env.PATH = Array.from(seen).join(PATH_SEP);
-}
-
-const TDAY_BIN = join(homedir(), '.tday', 'bin');
-
-/**
- * Download `fd` (sharkdp/fd) into ~/.tday/bin if it's not already on PATH.
- *
- * Why: pi-coding-agent shells out to `fd` for fast directory listings. When
- * `fd` is missing, recent pi versions try to download it from a URL that
- * sometimes 404s (`fd not found. Downloading...Failed to download fd:
- * Failed to download: 404`), leaving every tab broken. We sidestep that by
- * pre-installing `fd` ourselves from the canonical GitHub release.
- *
- * Idempotent — does nothing on subsequent calls once fd is on PATH or in
- * ~/.tday/bin. Network failures are non-fatal: we proceed to spawn pi
- * without fd; the user can still install fd manually.
- */
-async function ensureFd(env: Record<string, string | undefined>): Promise<void> {
-  // The fd binary name: `fd` on Unix, `fd.exe` on Windows.
-  const fdBin = process.platform === 'win32' ? 'fd.exe' : 'fd';
-  // Already on PATH? bail.
-  for (const dir of (env.PATH ?? '').split(PATH_SEP)) {
-    if (dir && existsSync(join(dir, fdBin))) return;
-  }
-  const target = join(TDAY_BIN, fdBin);
-  if (existsSync(target)) {
-    env.PATH = `${TDAY_BIN}${PATH_SEP}${env.PATH ?? ''}`;
-    return;
-  }
-
-  const version = 'v10.2.0';
-  let archive: string;
-  let url: string;
-
-  if (process.platform === 'darwin') {
-    const arch = osArch() === 'arm64' ? 'aarch64' : 'x86_64';
-    archive = `fd-${version}-${arch}-apple-darwin.tar.gz`;
-    url = `https://github.com/sharkdp/fd/releases/download/${version}/${archive}`;
-  } else if (process.platform === 'win32') {
-    archive = `fd-${version}-x86_64-pc-windows-msvc.zip`;
-    url = `https://github.com/sharkdp/fd/releases/download/${version}/${archive}`;
-  } else {
-    // Linux users almost always have fd via package manager — leave them to it.
-    return;
-  }
-
-  const archivePath = join(TDAY_BIN, archive);
-
-  try {
-    if (!existsSync(TDAY_BIN)) mkdirSync(TDAY_BIN, { recursive: true });
-    console.log('[tday] downloading fd:', url);
-    await downloadFollowingRedirects(url, archivePath);
-    if (process.platform === 'win32') {
-      // Windows: use Node's built-in unzip (available in Node 18+ via child_process + PowerShell)
-      execFileSync('powershell', [
-        '-NoProfile', '-NonInteractive', '-Command',
-        `Expand-Archive -Path "${archivePath}" -DestinationPath "${TDAY_BIN}" -Force`,
-      ], { stdio: 'ignore', timeout: 30_000 });
-    } else {
-      // macOS: tar extract
-      execFileSync('tar', ['-xzf', archivePath, '-C', TDAY_BIN, '--strip-components=1'], {
-        stdio: 'ignore',
-      });
-      chmodSync(target, 0o755);
-    }
-    env.PATH = `${TDAY_BIN}${PATH_SEP}${env.PATH ?? ''}`;
-    console.log('[tday] fd installed at', target);
-  } catch (err) {
-    console.error('[tday] fd auto-install failed (non-fatal):', err);
-  }
-}
-
-function downloadFollowingRedirects(url: string, dest: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const get = (u: string, hops: number) => {
-      if (hops > 5) return reject(new Error('too many redirects'));
-      const req = httpsRequest(u, { method: 'GET' }, (res) => {
-        const code = res.statusCode ?? 0;
-        if (code >= 300 && code < 400 && res.headers.location) {
-          res.resume();
-          get(new URL(res.headers.location, u).toString(), hops + 1);
-          return;
-        }
-        if (code !== 200) {
-          res.resume();
-          reject(new Error(`download ${u} \u2192 HTTP ${code}`));
-          return;
-        }
-        const out = createWriteStream(dest);
-        res.pipe(out);
-        out.on('finish', () => out.close(() => resolve()));
-        out.on('error', reject);
-      });
-      req.on('error', reject);
-      req.end();
-    };
-    get(url, 0);
-  });
-}
-
-/**
- * Auto-install registry. Pi gets a real npm installer; the other harnesses
- * are detected on PATH but installed by the user (each vendor publishes its
- * own installer / Homebrew formula / npm package, and we don't second-guess
- * which one the user wants).
- */
-const INSTALL_SPECS: Record<AgentId, AgentInstallSpec | undefined> = {
-  pi: {
-    agentId: 'pi',
-    displayName: 'Pi',
-    description: 'badlogic/pi-mono coding agent (npm: @mariozechner/pi-coding-agent)',
-    npmPackage: '@mariozechner/pi-coding-agent',
-    bin: 'pi',
-  },
-  'claude-code': {
-    agentId: 'claude-code',
-    displayName: 'Claude Code',
-    description: "Anthropic's official CLI (npm: @anthropic-ai/claude-code)",
-    npmPackage: '@anthropic-ai/claude-code',
-    bin: 'claude',
-  },
-  codex: {
-    agentId: 'codex',
-    displayName: 'Codex CLI',
-    description: "OpenAI's coding agent (npm: @openai/codex)",
-    npmPackage: '@openai/codex',
-    bin: 'codex',
-  },
-  copilot: {
-    agentId: 'copilot',
-    displayName: 'Copilot CLI',
-    description: "GitHub's terminal coding agent (npm: @github/copilot)",
-    npmPackage: '@github/copilot',
-    bin: 'copilot',
-  },
-  opencode: {
-    agentId: 'opencode',
-    displayName: 'OpenCode',
-    description: 'sst/opencode terminal agent (npm: opencode-ai)',
-    npmPackage: 'opencode-ai',
-    bin: 'opencode',
-  },
-  gemini: {
-    agentId: 'gemini',
-    displayName: 'Gemini CLI',
-    description: "Google's coding agent (npm: @google/gemini-cli)",
-    npmPackage: '@google/gemini-cli',
-    bin: 'gemini',
-  },
-  'qwen-code': {
-    agentId: 'qwen-code',
-    displayName: 'Qwen Code',
-    description: "Alibaba's coding agent (npm: @qwen-code/qwen-code)",
-    npmPackage: '@qwen-code/qwen-code',
-    bin: 'qwen',
-  },
-  crush: {
-    agentId: 'crush',
-    displayName: 'Crush',
-    description: 'charm.land terminal coding agent (npm: @charmland/crush)',
-    npmPackage: '@charmland/crush',
-    bin: 'crush',
-  },
-  hermes: {
-    agentId: 'hermes',
-    displayName: 'Hermes',
-    description: 'Hermes coding agent — install manually and ensure `hermes` is on PATH',
-    bin: 'hermes',
-  },
-};
-
-/**
- * Generic detect: which $bin + try --version with a short timeout. Used for
- * harnesses we don't have a dedicated adapter for yet.
- */
-function detectGeneric(bin: string): { available: boolean; version?: string; error?: string } {
-  try {
-    // `where` on Windows, `which` on POSIX
-    const whichCmd = process.platform === 'win32' ? 'where' : 'which';
-    const path = execFileSync(whichCmd, [bin], { encoding: 'utf8' }).split(/\r?\n/)[0].trim();
-    if (!path) return { available: false };
-    let version: string | undefined;
-    try {
-      version = execFileSync(path, ['--version'], { encoding: 'utf8', timeout: 2_000 }).trim();
-    } catch {
-      // optional
-    }
-    return { available: true, version };
-  } catch {
-    return { available: false };
-  }
-}
-
-function resolveExecutable(
-  bin: string,
-  env: NodeJS.ProcessEnv,
-): { requested: string; resolved: string | null } {
-  if (isAbsolute(bin)) {
-    return { requested: bin, resolved: existsSync(bin) ? bin : null };
-  }
-
-  // On Windows executables may need .exe or .cmd suffix.
-  const suffixes = process.platform === 'win32' ? ['', '.exe', '.cmd', '.bat'] : [''];
-
-  for (const dir of (env.PATH ?? '').split(PATH_SEP)) {
-    if (!dir) continue;
-    for (const suffix of suffixes) {
-      const candidate = join(dir, bin + suffix);
-      if (existsSync(candidate)) {
-        return { requested: bin, resolved: candidate };
-      }
-    }
-  }
-
-  try {
-    const whichCmd = process.platform === 'win32' ? 'where' : 'which';
-    const resolved = execFileSync(whichCmd, [bin], {
-      encoding: 'utf8',
-      env,
-      timeout: 2_000,
-    }).split(/\r?\n/)[0].trim();
-    return { requested: bin, resolved: resolved || null };
-  } catch {
-    return { requested: bin, resolved: null };
-  }
-}
-
-function normalizeLaunchCwd(cwd: string | undefined): string {
-  if (cwd && existsSync(cwd)) return cwd;
-  return homedir();
-}
-
-function appendNoProxy(env: Record<string, string>, hosts: string[]): void {
-  const existing = new Set(
-    `${env.NO_PROXY ?? ''},${env.no_proxy ?? ''}`
-      .split(',')
-      .map((host) => host.trim())
-      .filter(Boolean),
-  );
-  for (const host of hosts) existing.add(host);
-  const value = Array.from(existing).join(',');
-  env.NO_PROXY = value;
-  env.no_proxy = value;
-}
-
-function normalizeProviderProfile(provider: ProviderProfile): ProviderProfile {
-  const apiStyle = provider.apiStyle ?? 'openai';
-  if (
-    provider.kind === 'deepseek' &&
-    apiStyle === 'openai' &&
-    provider.baseUrl?.replace(/\/$/, '') === 'https://api.deepseek.com/v1'
-  ) {
-    return { ...provider, apiStyle, baseUrl: 'https://api.deepseek.com' };
-  }
-  return provider.apiStyle ? provider : { ...provider, apiStyle };
-}
-
-function normalizeProvidersConfig(config: ProvidersConfig): ProvidersConfig {
-  return {
-    ...config,
-    profiles: config.profiles.map(normalizeProviderProfile),
-  };
-}
-
-/**
- * Map our internal `ProviderKind` to the provider id that opencode uses
- * internally (https://opencode.ai/docs/providers/). For unknown kinds we
- * fall through to a sensible default ("openai-compatible") which routes
- * via the OPENAI_BASE_URL/OPENAI_API_KEY env we already inject.
- */
-function opencodeProviderId(kind: string | undefined): string {
-  switch (kind) {
-    case 'anthropic':
-      return 'anthropic';
-    case 'google':
-      return 'google';
-    case 'openrouter':
-      return 'openrouter';
-    case 'groq':
-      return 'groq';
-    case 'xai':
-      return 'xai';
-    case 'mistral':
-      return 'mistral';
-    case 'deepseek':
-      return 'deepseek';
-    case 'fireworks':
-      return 'fireworks-ai';
-    case 'together':
-      return 'togetherai';
-    case 'cerebras':
-      return 'cerebras';
-    case 'ollama':
-      return 'ollama';
-    case 'lmstudio':
-      return 'lmstudio';
-    case 'openai':
-    default:
-      return 'openai';
-  }
-}
-
-/**
- * Per-vendor CLI flag conventions for selecting the model. Without this,
- * Codex CLI and Claude Code each fall back to their own on-disk config
- * (e.g. `~/.codex/config.toml`), so Tday's "Model override" silently has no
- * effect. We project the configured model onto the right command-line flag
- * so the spawned process honours Tday's choice every time.
- *
- * For Codex we also supply `model_provider` + a synthesised
- * `model_providers.tday` entry via repeated `-c` overrides, plus minimal
- * `model_metadata` for the chosen model — without this Codex would default
- * to its built-in OpenAI provider regardless of OPENAI_BASE_URL, and would
- * print "Model metadata for `<id>` not found" warnings for unknown ids.
- *
- * For opencode the model flag must be in `<provider>/<model>` form.
- */
-function modelFlagsFor(
-  agentId: AgentId,
-  model: string | undefined,
-  providerKind: string | undefined,
-  apiStyle: 'openai' | 'anthropic' | undefined,
-  baseUrl: string | undefined,
-): string[] {
-  if (!model) return [];
-  switch (agentId) {
-    case 'claude-code':
-      // `claude --model <alias|id>`.
-      return ['--model', model];
-    case 'opencode': {
-      // opencode requires `<provider>/<model>`. If the caller already wrote
-      // it in slash form (e.g. "openrouter/anthropic/claude-3.5"), trust it.
-      const composed = model.includes('/') ? model : `${opencodeProviderId(providerKind)}/${model}`;
-      return ['--model', composed];
-    }
-    case 'gemini':
-      return ['--model', model];
-    case 'qwen-code':
-      return ['--model', model];
-    case 'codex': {
-      const args: string[] = ['--model', model];
-      // codex 0.50+ requires `wire_api = "responses"`; the legacy
-      // `"chat"` value is rejected at config-load time. For chat-only
-      // vendors that we know how to adapt, the caller passes a local
-      // Responses-compatible proxy URL as `baseUrl`.
-      const envKey = providerKind ? envKeyForKind(providerKind, apiStyle) : 'OPENAI_API_KEY';
-      args.push('-c', 'model_provider="tday"');
-      args.push('-c', 'model_providers.tday.name="Tday"');
-      if (baseUrl) {
-        args.push('-c', `model_providers.tday.base_url="${baseUrl}"`);
-      }
-      args.push('-c', `model_providers.tday.env_key="${envKey}"`);
-      args.push('-c', 'model_providers.tday.wire_api="responses"');
-      args.push('-c', 'model_providers.tday.requires_openai_auth=false');
-      // Silence the "Model metadata for `<id>` not found" fallback warning.
-      const metaKey = `"${model.replace(/"/g, '\\"')}"`;
-      args.push('-c', `model_metadata.${metaKey}.context_window=128000`);
-      args.push('-c', `model_metadata.${metaKey}.max_output_tokens=8192`);
-      return args;
-    }
-    case 'copilot':
-      return ['--model', model];
-    case 'crush':
-    case 'hermes':
-    case 'pi':
-    default:
-      return [];
-  }
-}
-
-/**
- * Mirror of the env-key choices in `packages/adapters/pi`. Used by Codex's
- * `model_providers.tday.env_key` so codex picks the right key out of the
- * environment we already populated.
- */
-function envKeyForKind(kind: string, style: 'openai' | 'anthropic' | undefined): string {
-  if (style === 'anthropic') return 'ANTHROPIC_API_KEY';
-  switch (kind) {
-    case 'deepseek':
-      return 'DEEPSEEK_API_KEY';
-    case 'google':
-      return 'GEMINI_API_KEY';
-    case 'xai':
-      return 'XAI_API_KEY';
-    case 'groq':
-      return 'GROQ_API_KEY';
-    case 'mistral':
-      return 'MISTRAL_API_KEY';
-    case 'moonshot':
-      return 'MOONSHOT_API_KEY';
-    case 'cerebras':
-      return 'CEREBRAS_API_KEY';
-    case 'together':
-      return 'TOGETHER_API_KEY';
-    case 'fireworks':
-      return 'FIREWORKS_API_KEY';
-    case 'zai':
-      return 'ZAI_API_KEY';
-    case 'qwen':
-      return 'DASHSCOPE_API_KEY';
-    case 'volcengine':
-      return 'ARK_API_KEY';
-    case 'minimax':
-      return 'MINIMAX_API_KEY';
-    case 'stepfun':
-      return 'STEPFUN_API_KEY';
-    case 'openrouter':
-      return 'OPENROUTER_API_KEY';
-    case 'anthropic':
-      return 'ANTHROPIC_API_KEY';
-    default:
-      return 'OPENAI_API_KEY';
-  }
-}
-
-function readJson<T>(path: string, fallback: T): T {
-  try {
-    if (!existsSync(path)) return fallback;
-    return JSON.parse(readFileSync(path, 'utf8')) as T;
-  } catch (err) {
-    console.error('[tday] failed to read', path, err);
-    return fallback;
-  }
-}
-
-function loadAgents(): AgentsConfig {
-  return readJson<AgentsConfig>(join(TDAY_DIR, 'agents.json'), {});
-}
-function loadProviders(): ProvidersConfig {
-  return normalizeProvidersConfig(
-    readJson<ProvidersConfig>(join(TDAY_DIR, 'providers.json'), {
-      profiles: [],
-    }),
-  );
-}
-
-const ptys = new Map<string, IPty>();
-
-/**
- * Set to `true` once the app is shutting down. node-pty fires `onData`/`onExit`
- * asynchronously after we kill the process, and if the BrowserWindow has
- * already been destroyed the call to `event.sender.send(...)` raises
- * `Object has been destroyed` — which Electron promotes to a fatal main-process
- * uncaught exception dialog. Guarding sends on this flag prevents the dialog.
- */
-let shuttingDown = false;
-/** caffeinate(8) child process used for lid-close sleep prevention on macOS. */
-let caffeinateProc: ReturnType<typeof spawnChild> | null = null;
-/** Whether Keep Awake is intentionally active (survives sleep/wake cycles). */
-let keepAwakeActive = false;
-
-function killAllPtys(): void {
-  for (const p of ptys.values()) {
-    try {
-      p.kill();
-    } catch {
-      // already dead
-    }
-  }
-  ptys.clear();
-}
-
-function createWindow(): void {
-  const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    show: false,
-    autoHideMenuBar: true,
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
-    backgroundColor: '#0a0a0f',
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
-      contextIsolation: true,
-    },
-  });
-
-  mainWindow = win;
-
-  win.on('ready-to-show', () => win.show());
-  win.on('close', () => app.quit());
-  win.on('closed', () => { mainWindow = null; });
-  win.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url);
-    return { action: 'deny' };
-  });
-
-  if (is.dev && process.env.ELECTRON_RENDERER_URL) {
-    void win.loadURL(process.env.ELECTRON_RENDERER_URL);
-  } else {
-    void win.loadFile(join(__dirname, '../renderer/index.html'));
-  }
-}
+// ── IPC registration ──────────────────────────────────────────────────────────
 
 function registerIpc(): void {
   ipcMain.handle(IPC.homeDir, () => homedir());
@@ -731,14 +112,12 @@ function registerIpc(): void {
     return res.filePaths[0];
   });
 
+  // Agent list & config
   ipcMain.handle(IPC.agentsList, (): AgentInfo[] => {
     const agents = loadAgents();
     const defaultId = agents.defaultAgentId ?? 'pi';
     const out: AgentInfo[] = [];
-    for (const [id, spec] of Object.entries(INSTALL_SPECS) as Array<[
-      AgentId,
-      AgentInstallSpec | undefined,
-    ]>) {
+    for (const [id, spec] of Object.entries(INSTALL_SPECS) as Array<[AgentId, AgentInstallSpec | undefined]>) {
       const settings = agents.agents?.[id] ?? {};
       const bin = settings.bin ?? spec?.bin ?? id;
       const detect = id === 'pi' ? PiAdapter.detect(bin) : detectGeneric(bin);
@@ -758,10 +137,7 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.agentsSave, (_e, next: AgentsConfig) => {
     if (!existsSync(TDAY_DIR)) mkdirSync(TDAY_DIR, { recursive: true });
-    writeFileSync(
-      join(TDAY_DIR, 'agents.json'),
-      JSON.stringify(next, null, 2) + '\n',
-    );
+    writeFileSync(join(TDAY_DIR, 'agents.json'), JSON.stringify(next, null, 2) + '\n');
     return { ok: true };
   });
 
@@ -770,39 +146,26 @@ function registerIpc(): void {
   ipcMain.handle(IPC.providersSave, (_e, next: ProvidersConfig) => {
     if (!existsSync(TDAY_DIR)) mkdirSync(TDAY_DIR, { recursive: true });
     const normalized = normalizeProvidersConfig(next);
-    writeFileSync(
-      join(TDAY_DIR, 'providers.json'),
-      JSON.stringify(normalized, null, 2) + '\n',
-    );
+    writeFileSync(join(TDAY_DIR, 'providers.json'), JSON.stringify(normalized, null, 2) + '\n');
     return { ok: true };
   });
 
+  // PTY spawn
   ipcMain.handle(IPC.ptySpawn, async (event, req: SpawnRequest) => {
-    // If the tab already has a PTY (e.g. user changed cwd → restart),
-    // dispose the old one before spawning a fresh one.
     const existing = ptys.get(req.tabId);
     if (existing) {
-      try {
-        existing.kill();
-      } catch {
-        // already dead
-      }
+      try { existing.kill(); } catch { /* already dead */ }
       ptys.delete(req.tabId);
     }
 
     const agents = loadAgents();
     const providers = loadProviders();
     const agentConf = agents.agents?.[req.agentId] ?? {};
-    // Resolution order: spawn-request override → agent binding → providers.default
     const providerId = req.providerId ?? agentConf.providerId ?? providers.default;
-    const provider =
-      providers.profiles.find((p) => p.id === providerId) ?? providers.profiles[0];
-    // Per-agent model override.
+    const provider = providers.profiles.find((p) => p.id === providerId) ?? providers.profiles[0];
     const effectiveProvider =
       provider && agentConf.model ? { ...provider, model: agentConf.model } : provider;
 
-    // Make sure pi's bundled tools (especially `fd`) won't try to download
-    // from a stale URL — see ensureFd() docs.
     const cwd = normalizeLaunchCwd(req.cwd);
     const baseEnv = { ...process.env };
     await ensureFd(baseEnv);
@@ -827,9 +190,11 @@ function registerIpc(): void {
       args = launch.args;
       env = launch.env;
       launchCwd = normalizeLaunchCwd(launch.cwd);
+      // For cron jobs pass the prompt as a positional CLI arg (same pattern as other agents)
+      if (req.isCronJob && req.initialPrompt?.trim()) {
+        args = [...args, req.initialPrompt.trim()];
+      }
     } else {
-      // Generic launch: just exec the binary with extra args; provider env
-      // vars are projected through the same conventions as Pi.
       const piLike = PiAdapter.buildLaunch({
         bin,
         extraArgs: agentConf.args,
@@ -837,18 +202,11 @@ function registerIpc(): void {
         cwd,
         env: baseEnv,
       });
-      // Drop pi-specific --provider/--model flags for non-pi harnesses, then
-      // re-inject `--model <id>` per-vendor — otherwise tools like Codex CLI
-      // and Claude Code silently fall back to whatever's in their own
-      // config file (~/.codex/config.toml etc.) and ignore Tday's setting.
       cmd = piLike.cmd;
       const userArgs = (agentConf.args ?? []).slice();
       const gatewayResolution =
         effectiveProvider
-          ? await localGatewayManager.resolve({
-              agentId: req.agentId,
-              provider: effectiveProvider,
-            })
+          ? await localGatewayManager.resolve({ agentId: req.agentId, provider: effectiveProvider })
           : null;
       const modelArgs = modelFlagsFor(
         req.agentId,
@@ -858,85 +216,35 @@ function registerIpc(): void {
         gatewayResolution?.baseUrl ?? effectiveProvider?.baseUrl,
       );
       args = [...modelArgs, ...userArgs];
-      // Per-agent session resume — each agent has its own convention:
-      //   claude-code: flag  --resume <uuid>
-      //   codex:       subcommand  resume <uuid>  (replaces model flags)
-      //   opencode:    flag  --session <id>
+
       if (req.agentSessionId) {
         switch (req.agentId) {
-          case 'claude-code':
-            args = ['--resume', req.agentSessionId, ...args];
-            break;
-          case 'codex':
-            // `codex resume <uuid>` is a subcommand; don't pass model flags
-            // (the session already has them).
-            args = ['resume', req.agentSessionId];
-            break;
-          case 'opencode':
-            args = ['--session', req.agentSessionId, ...args];
-            break;
-          default:
-            break;
+          case 'claude-code': args = ['--resume', req.agentSessionId, ...args]; break;
+          case 'codex':       args = ['resume', req.agentSessionId]; break;
+          case 'opencode':    args = ['--session', req.agentSessionId, ...args]; break;
+          default: break;
         }
       }
 
-      // Initial prompt: for agents that accept a task as a positional CLI
-      // argument, append it now.  We only do this when NOT resuming a session
-      // (the resumed session already has context) and when the agent is known
-      // to support a positional task argument.
-      //
-      //   codex        → `codex [flags] <task>`
-      //   claude-code  → `claude [flags] <message>`  (starts interactive + pre-seeds first turn)
-      //   opencode     → `opencode run [flags] <message>`  NOTE: positional for default cmd is
-      //                   the *project path*, so we must use the `run` subcommand.
-      //   gemini       → `gemini [flags] <prompt>`
-      //   qwen-code    → `qwen-code [flags] <prompt>`
-      //
-      // For all other agents the prompt is delivered via a timed PTY write
-      // from the main process (see below) — this is reliable even when the
-      // screen is locked because the PTY is a kernel-level resource and the
-      // main-process event loop keeps running.
       const initialPrompt = req.initialPrompt?.trim();
-      // For opencode cron jobs use `opencode run [flags] <prompt>` (one-shot).
-      // claude-code keeps the interactive TUI + CLI arg approach so that sessions
-      // are recorded (history). `-p` non-interactive mode skips session persistence.
       if (req.isCronJob && req.agentId === 'opencode' && !req.agentSessionId) {
         args = ['run', ...args];
       }
 
-      // opencode is intentionally excluded from CLI_PROMPT_AGENTS for interactive tabs:
-      //   `opencode run <msg>` is a non-interactive one-shot mode that exits
-      //   after the task completes, leaving a dead tab with no way to continue.
-      //   Instead we launch the interactive TUI (`opencode` with no subcommand)
-      //   and deliver the prompt via bracketed-paste PTY write — the TUI stays
-      //   open after the response so the user can review and continue.
-      //   opentui (opencode's TUI framework) confirms bracketedPasteStart/End
-      //   support, so ESC[200~…ESC[201~ is honoured.
-      // For cron tabs opencode IS handled via `opencode run` (added above), so
-      // we include it in CLI_PROMPT_AGENTS only for that case.
       const CLI_PROMPT_AGENTS: AgentId[] = [
         'codex', 'claude-code', 'gemini', 'qwen-code',
         ...(req.isCronJob ? (['opencode'] as AgentId[]) : []),
       ];
       const sentViaCliArg = !!(
-        initialPrompt &&
-        !req.agentSessionId &&
-        CLI_PROMPT_AGENTS.includes(req.agentId)
+        initialPrompt && !req.agentSessionId && CLI_PROMPT_AGENTS.includes(req.agentId)
       );
-      if (sentViaCliArg && initialPrompt) {
-        args = [...args, initialPrompt];
-      }
+      if (sentViaCliArg && initialPrompt) args = [...args, initialPrompt];
 
       env = piLike.env;
-      if (gatewayResolution?.noProxyHosts?.length) {
-        appendNoProxy(env, gatewayResolution.noProxyHosts);
-      }
+      if (gatewayResolution?.noProxyHosts?.length) appendNoProxy(env, gatewayResolution.noProxyHosts);
       launchCwd = normalizeLaunchCwd(piLike.cwd);
     }
 
-    // Propagate PTY dimensions as env vars so React-Ink CLIs (e.g.
-    // claude-code) fall back to the correct terminal width via
-    // process.env.COLUMNS when ioctl(TIOCGWINSZ) isn't available.
     env.COLUMNS = String(req.cols);
     env.LINES = String(req.rows);
 
@@ -945,9 +253,7 @@ function registerIpc(): void {
       const pathParts = (env.PATH ?? '').split(PATH_SEP).filter(Boolean);
       const pathPreview = pathParts.slice(0, 8).join(PATH_SEP);
       throw new Error(
-        `executable not found: ${resolved.requested}\n` +
-          `cwd: ${launchCwd}\n` +
-          `PATH: ${pathPreview}${pathParts.length > 8 ? `${PATH_SEP}…` : ''}`,
+        `executable not found: ${resolved.requested}\ncwd: ${launchCwd}\nPATH: ${pathPreview}${pathParts.length > 8 ? `${PATH_SEP}…` : ''}`,
       );
     }
 
@@ -961,451 +267,130 @@ function registerIpc(): void {
 
     ptys.set(req.tabId, pty);
 
-    // For agents that do NOT accept a CLI positional prompt (pi, copilot,
-    // crush, hermes, …), write the initial prompt directly to the PTY from the
-    // main process after a startup grace period.
-    //
-    // Doing this in the main process (instead of a renderer setTimeout) means
-    // it is completely reliable: the PTY and Node.js event loop run
-    // independently of whether the window is visible, the screen is locked, or
-    // the renderer is suspended.
     const initialPromptForPty = req.initialPrompt?.trim();
-    // Agents that receive their prompt via CLI arg (not PTY write).
-    // opencode in cron mode also uses CLI arg (`opencode run <prompt>`).
     const _cliAgents: AgentId[] = [
       'codex', 'claude-code', 'gemini', 'qwen-code',
-      ...(req.isCronJob ? (['opencode'] as AgentId[]) : []),
+      // For cron jobs: opencode uses 'run' subcommand, pi uses positional arg — both skip PTY write
+      ...(req.isCronJob ? (['opencode', 'pi'] as AgentId[]) : []),
     ];
     const needsPtyWrite =
-      initialPromptForPty &&
-      !req.agentSessionId &&
-      !_cliAgents.includes(req.agentId);
+      initialPromptForPty && !req.agentSessionId && !_cliAgents.includes(req.agentId);
     if (needsPtyWrite && initialPromptForPty) {
-      // Use bracketed-paste mode (XTerm "paste" protocol) so that newlines in
-      // multi-line or markdown prompts are NOT interpreted as Enter keystrokes
-      // by the agent's raw-mode terminal driver.  Modern interactive CLIs
-      // (pi, copilot, opencode, hermes, etc.) honour this protocol:
-      //   ESC[200~  <text with literal \n intact>  ESC[201~  CR
-      //
-      // We still strip dangerous C0 control chars OTHER than \n/\r that could
-      // trigger Ctrl+C (\x03), Ctrl+D (\x04), ESC sequences, etc., because
-      // bracketed-paste doesn't protect against those on all terminals.
       const sanitized = initialPromptForPty
-        .replace(/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F]/g, ' ') // C0 except \n(\x0A) and \r(\x0D) → space
-        .replace(/ {2,}/g, ' ');                             // collapse multiple spaces
+        .replace(/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F]/g, ' ')
+        .replace(/ {2,}/g, ' ');
       const bracketedPayload = `\x1b[200~${sanitized}\x1b[201~\r`;
       const tabId = req.tabId;
-      // Grace period before writing the prompt.
-      // opencode ships a 128 MB x86_64 native binary (runs via Rosetta 2 on
-      // arm64 Macs), so it needs a longer startup window than pure-JS agents.
       const graceMs = req.agentId === 'opencode' ? 8000 : 3500;
-      setTimeout(() => {
-        ptys.get(tabId)?.write(bracketedPayload);
-      }, graceMs);
+      setTimeout(() => { ptys.get(tabId)?.write(bracketedPayload); }, graceMs);
     }
 
     pty.onData((data) => {
-      // Drop late events arriving after the window or app has gone away.
       if (shuttingDown || event.sender.isDestroyed()) return;
       event.sender.send(IPC.ptyData, { tabId: req.tabId, data });
     });
     pty.onExit(({ exitCode, signal }) => {
       if (!shuttingDown && !event.sender.isDestroyed()) {
-        event.sender.send(IPC.ptyExit, {
-          tabId: req.tabId,
-          exitCode,
-          signal: signal ?? null,
-        });
+        event.sender.send(IPC.ptyExit, { tabId: req.tabId, exitCode, signal: signal ?? null });
       }
-      // CRITICAL: only clear the map entry if it still points to *this* PTY.
-      // When a tab restarts (cwd commit) the old PTY is killed and a new one
-      // is spawned under the same tabId; without this guard the stale onExit
-      // would race in and delete the new PTY entry, silently breaking input.
-      if (ptys.get(req.tabId) === pty) {
-        ptys.delete(req.tabId);
-      }
+      if (ptys.get(req.tabId) === pty) ptys.delete(req.tabId);
     });
 
     return { pid: pty.pid };
   });
 
-  ipcMain.handle(IPC.ptyWrite, (_e, tabId: string, data: string) => {
-    ptys.get(tabId)?.write(data);
-  });
+  ipcMain.handle(IPC.ptyWrite,  (_e, tabId: string, data: string) => { ptys.get(tabId)?.write(data); });
   ipcMain.handle(IPC.ptyResize, (_e, tabId: string, cols: number, rows: number) => {
-    try {
-      ptys.get(tabId)?.resize(cols, rows);
-    } catch {
-      // resize can throw if the pty already exited; ignore.
-    }
+    try { ptys.get(tabId)?.resize(cols, rows); } catch { /* ignore */ }
   });
   ipcMain.handle(IPC.ptyKill, (_e, tabId: string) => {
     const p = ptys.get(tabId);
     if (p) {
-      try {
-        p.kill();
-      } catch {
-        // already dead
-      }
+      try { p.kill(); } catch { /* already dead */ }
       ptys.delete(tabId);
     }
   });
 
-  ipcMain.handle(IPC.agentInstall, (event, agentId: AgentId) =>
-    runNpmGlobal(event, agentId, 'install'),
-  );
-  ipcMain.handle(IPC.agentUpdate, (event, agentId: AgentId) =>
-    runNpmGlobal(event, agentId, 'update'),
-  );
-  ipcMain.handle(IPC.agentUninstall, (event, agentId: AgentId) =>
-    runNpmGlobal(event, agentId, 'uninstall'),
-  );
+  // Agent install / update / uninstall
+  ipcMain.handle(IPC.agentInstall,   (event, agentId: AgentId) => runNpmGlobal(event, agentId, 'install',   INSTALL_SPECS[agentId]));
+  ipcMain.handle(IPC.agentUpdate,    (event, agentId: AgentId) => runNpmGlobal(event, agentId, 'update',    INSTALL_SPECS[agentId]));
+  ipcMain.handle(IPC.agentUninstall, (event, agentId: AgentId) => runNpmGlobal(event, agentId, 'uninstall', INSTALL_SPECS[agentId]));
 
-  // ── Local service discovery ────────────────────────────────────────────────
+  // Local service discovery
   ipcMain.handle(IPC.discoverServices, (_e, req: { extraHosts?: string[]; scanSubnet?: boolean } = {}) =>
     discoverLocalServices({ extraHosts: req.extraHosts, scanSubnet: req.scanSubnet }),
   );
-
   ipcMain.handle(IPC.probeUrl, (_e, url: string) => probeBaseUrl(url));
 
-  // ── Token usage statistics ─────────────────────────────────────────────────
-  ipcMain.handle(IPC.usageAppend, (_e, record: UsageRecord) => {
-    appendUsage(record);
-  });
+  // Token usage statistics
+  ipcMain.handle(IPC.usageAppend, (_e, record: UsageRecord) => { appendUsage(record); });
   ipcMain.handle(IPC.usageQuery, (_e, filter: UsageFilter = {}) => {
-    // Trigger a background incremental refresh (non-blocking — returns before
-    // any file I/O starts). The next query will get fresher data.
     triggerSessionCacheRefresh();
-
-    // Fast path: serve from the persistent on-disk cache (in-memory hot cache).
     const sessionRecords = loadCachedSessionRecords(filter);
-    const jsonlRecords = loadUsageRecords(filter).filter(
-      (r) => !SESSION_FILE_AGENTS.has(r.agentId),
-    );
+    const jsonlRecords = loadUsageRecords(filter).filter((r) => !SESSION_FILE_AGENTS.has(r.agentId));
     return computeUsageSummary([...jsonlRecords, ...sessionRecords]);
   });
 
-  // ── Power management ───────────────────────────────────────────────────────
-  // macOS: Electron's powerSaveBlocker('prevent-app-suspension') only registers
-  // a NoIdleSleepAssertion (PreventUserIdleSystemSleep), which prevents idle
-  // timeout sleep but NOT lid-close sleep.
-  //
-  // To prevent lid-close sleep on AC power we additionally spawn `caffeinate -si`:
-  //   -s  PreventSystemSleep assertion (blocks lid-close sleep when on AC power)
-  //   -i  PreventUserIdleSystemSleep   (redundant but harmless belt-and-suspenders)
-  //
-  // On battery power macOS will still allow sleep on lid-close — this is an
-  // OS-level policy that cannot be overridden by user-space without root/SIP bypass.
-  //
-  // Windows / Linux: powerSaveBlocker alone is sufficient.
-  const spawnCaffeinate = () => {
-    if (process.platform !== 'darwin' || caffeinateProc) return;
-    caffeinateProc = spawnChild('caffeinate', ['-si'], { stdio: 'ignore' });
-    caffeinateProc.on('exit', () => { caffeinateProc = null; });
-  };
+  // Power management
+  registerPowerHandlers();
 
-  // After any sleep/wake cycle macOS may have dropped our power assertion
-  // (caffeinate process killed by the kernel during suspend). Re-spawn if
-  // Keep Awake is still supposed to be active.
-  powerMonitor.on('resume', () => {
-    if (keepAwakeActive && !caffeinateProc) spawnCaffeinate();
-  });
-
-  // Heartbeat: `resume` only fires on full system suspend/wake, not on
-  // display-only sleep (pmset displaysleepnow). Poll every 30 s as a
-  // belt-and-suspenders guard against caffeinate exiting unexpectedly.
-  setInterval(() => {
-    if (keepAwakeActive && !caffeinateProc) spawnCaffeinate();
-  }, 30_000);
-
-  ipcMain.handle(IPC.powerBlockerStart, () => {
-    keepAwakeActive = true;
-    const id = powerSaveBlocker.start('prevent-app-suspension');
-    spawnCaffeinate();
-    return { id };
-  });
-  ipcMain.handle(IPC.powerBlockerStop, (_e, id: number) => {
-    keepAwakeActive = false;
-    if (typeof id === 'number' && powerSaveBlocker.isStarted(id)) {
-      powerSaveBlocker.stop(id);
-    }
-    if (caffeinateProc) {
-      caffeinateProc.kill();
-      caffeinateProc = null;
-    }
-  });
-
-  // ── Tab history ────────────────────────────────────────────────────────────
+  // Tab history
   ipcMain.handle(IPC.tabHistoryList, (): TabHistoryEntry[] => loadHistory());
   ipcMain.handle(IPC.tabHistoryPush, (_e, entry: TabHistoryEntry): void => {
     pushHistoryEntry(entry);
-    // Also merge into the agent history index (non-blocking).
     mergeTabEntry(entry);
   });
-  ipcMain.handle(IPC.tabHistoryDelete, (_e, histId: string): void => {
-    deleteHistoryEntry(histId);
-  });
-  ipcMain.handle(
-    IPC.latestAgentSession,
-    (_e, agentId: AgentId, cwd: string): string | null => latestAgentSession(agentId, cwd),
+  ipcMain.handle(IPC.tabHistoryDelete, (_e, histId: string): void => { deleteHistoryEntry(histId); });
+  ipcMain.handle(IPC.latestAgentSession, (_e, agentId: AgentId, cwd: string): string | null =>
+    latestAgentSession(agentId, cwd),
   );
-  ipcMain.handle(
-    IPC.readAgentSession,
-    (_e, agentId: AgentId, sessionId: string, cwd: string): SessionMessage[] =>
-      readAgentSession(agentId, sessionId, cwd),
+  ipcMain.handle(IPC.readAgentSession, (_e, agentId: AgentId, sessionId: string, cwd: string): SessionMessage[] =>
+    readAgentSession(agentId, sessionId, cwd),
   );
 
-  // ── Agent History Session Manager ──────────────────────────────────────────
-  ipcMain.handle(
-    IPC.agentHistoryList,
-    async (_e, filter?: AgentHistoryFilter): Promise<AgentHistoryEntry[]> => {
-      // Await the refresh so the renderer always receives populated data.
-      return refreshAndListAgentHistory(filter);
-    },
+  // Agent History
+  ipcMain.handle(IPC.agentHistoryList, async (_e, filter?: AgentHistoryFilter): Promise<AgentHistoryEntry[]> =>
+    refreshAndListAgentHistory(filter),
   );
-  ipcMain.handle(IPC.agentHistoryHide, (_e, id: string): void => {
-    hideHistoryEntry(id);
-  });
-  ipcMain.handle(IPC.agentHistoryRefresh, (): void => {
-    triggerHistoryRefresh();
-  });
+  ipcMain.handle(IPC.agentHistoryHide,    (_e, id: string): void => { hideHistoryEntry(id); });
+  ipcMain.handle(IPC.agentHistoryRefresh, (): void => { triggerHistoryRefresh(); });
 
-  // ── App Settings (native persistent storage) ────────────────────────────────
+  // App Settings
   ipcMain.handle(IPC.settingsGetAll, () => getAllSettings());
   ipcMain.handle(IPC.settingsSet, (_e, key: string, value: unknown): void => {
     setSetting(key, value as JsonValue);
   });
-  // ── Open external URL (https only) ────────────────────────────────────────
+
+  // Open external URL (https only)
   ipcMain.handle(IPC.openExternal, (_e, url: unknown) => {
     const safe = String(url);
     if (/^https:\/\//.test(safe)) void shell.openExternal(safe);
   });
 
-  // ── CronJob management ─────────────────────────────────────────────────────
+  // CronJob management
   ipcMain.handle(IPC.cronJobsList, (): CronJob[] => loadCronJobs());
-
   ipcMain.handle(IPC.cronJobsSave, (_e, jobs: CronJob[]): void => {
     saveCronJobs(jobs);
-    // Re-schedule all jobs whenever the list changes.
     cronScheduler.scheduleAll(jobs);
   });
-
   ipcMain.handle(IPC.cronJobsTrigger, (_e, jobId: string): void => {
     const job = loadCronJobs().find((j) => j.id === jobId);
     if (!job) return;
     cronScheduler.triggerNow(job);
   });
-
-  ipcMain.handle(IPC.cronJobsGetStats, (): Record<string, import('@tday/shared').CronJobStats> =>
-    loadCronStats(),
-  );
+  ipcMain.handle(IPC.cronJobsGetStats, (): Record<string, CronJobStats> => loadCronStats());
 }
 
-type NpmAction = 'install' | 'update' | 'uninstall';
-
-async function runNpmGlobal(
-  event: Electron.IpcMainInvokeEvent,
-  agentId: AgentId,
-  action: NpmAction,
-): Promise<{ ok: boolean; exitCode: number | null }> {
-  const spec = INSTALL_SPECS[agentId];
-  const send = (e: AgentInstallEvent) =>
-    !shuttingDown && !event.sender.isDestroyed() && event.sender.send(IPC.agentInstallProgress, e);
-  if (!spec || !spec.npmPackage) {
-    send({ agentId, kind: 'error', data: `no installer registered for agent "${agentId}"` });
-    return { ok: false, exitCode: null };
-  }
-
-  // For install we install pinned latest; update forces re-resolve to the
-  // latest published version; uninstall removes the global package.
-  const npmArgs =
-    action === 'uninstall'
-      ? ['uninstall', '-g', spec.npmPackage]
-      : action === 'update'
-        ? ['install', '-g', `${spec.npmPackage}@latest`, '--loglevel=info']
-        : ['install', '-g', spec.npmPackage, '--loglevel=info'];
-
-  const stages: Array<{ pct: number; status: string; matchers: RegExp[] }> = [
-    { pct: 5, status: 'starting', matchers: [/./] },
-    { pct: 15, status: 'resolving', matchers: [/idealtree|resolve|reify/i] },
-    { pct: 35, status: 'fetching', matchers: [/fetch|http|tarball|GET\s+200/i] },
-    { pct: 60, status: 'extracting', matchers: [/extract|unpack/i] },
-    { pct: 80, status: 'linking', matchers: [/link|symlink|bin\s/i] },
-    { pct: 92, status: 'finalizing', matchers: [/audit|cleanup|prepare/i] },
-  ];
-  let stageIdx = 0;
-  const advance = (line: string) => {
-    while (stageIdx < stages.length - 1) {
-      const next = stages[stageIdx + 1];
-      if (next.matchers.some((rx) => rx.test(line))) {
-        stageIdx += 1;
-        send({ agentId, kind: 'progress', percent: next.pct, status: next.status });
-      } else {
-        break;
-      }
-    }
-  };
-
-  const npmBin = ((): string | null => {
-    // On Windows npm may be `npm.cmd` (a wrapper batch file).
-    const npmNames = process.platform === 'win32' ? ['npm.cmd', 'npm.exe', 'npm'] : ['npm'];
-    const extraCandidates = process.platform === 'win32'
-      ? []
-      : ['/opt/homebrew/bin/npm', '/usr/local/bin/npm'];
-    for (const npmName of npmNames) {
-      const fromPath = (process.env.PATH ?? '').split(PATH_SEP)
-        .map((p) => join(p, npmName))
-        .find((c) => c && existsSync(c));
-      if (fromPath) return fromPath;
-    }
-    for (const c of extraCandidates) if (c && existsSync(c)) return c;
-    return null;
-  })();
-
-  if (!npmBin) {
-    send({
-      agentId,
-      kind: 'error',
-      data: 'npm not found on PATH. Install Node.js (https://nodejs.org) and relaunch Tday.',
-    });
-    return { ok: false, exitCode: null };
-  }
-
-  send({ agentId, kind: 'stdout', data: `[tday] using ${npmBin}\r\n` });
-  send({ agentId, kind: 'stdout', data: `[tday] ${action} ${spec.npmPackage}…\r\n` });
-  send({ agentId, kind: 'progress', percent: stages[0].pct, status: stages[0].status });
-
-  return await new Promise<{ ok: boolean; exitCode: number | null }>((resolve) => {
-    const child = spawnChild(npmBin, npmArgs, {
-      env: process.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    const onLine = (kind: 'stdout' | 'stderr', b: Buffer) => {
-      const text = b.toString();
-      send({ agentId, kind, data: text });
-      for (const line of text.split('\n')) advance(line);
-    };
-    child.stdout?.on('data', (b: Buffer) => onLine('stdout', b));
-    child.stderr?.on('data', (b: Buffer) => onLine('stderr', b));
-    child.on('error', (err) => {
-      send({ agentId, kind: 'error', data: String(err) });
-      resolve({ ok: false, exitCode: null });
-    });
-    child.on('close', (code) => {
-      if (code === 0) {
-        send({ agentId, kind: 'progress', percent: 100, status: 'done' });
-        send({ agentId, kind: 'done', exitCode: 0 });
-        resolve({ ok: true, exitCode: 0 });
-      } else {
-        send({
-          agentId,
-          kind: 'error',
-          data: `npm ${action} exited with code ${code}`,
-          exitCode: code,
-        });
-        resolve({ ok: false, exitCode: code });
-      }
-    });
-  });
-}
-
-function installAppMenu(): void {
-  const isMac = process.platform === 'darwin';
-  const sendShortcut = (channel: 'tab:new' | 'tab:close' | 'tab:restore') => () => {
-    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
-    win?.webContents.send(channel);
-  };
-  const tabMenu: Electron.MenuItemConstructorOptions = {
-    label: 'Tab',
-    submenu: [
-      {
-        label: 'New Tab',
-        accelerator: 'CommandOrControl+T',
-        click: sendShortcut('tab:new'),
-      },
-      {
-        label: 'Close Tab',
-        accelerator: 'CommandOrControl+W',
-        click: sendShortcut('tab:close'),
-      },
-      {
-        label: 'Restore Closed Tab',
-        accelerator: 'CommandOrControl+Shift+T',
-        click: sendShortcut('tab:restore'),
-      },
-    ],
-  };
-  const template: Electron.MenuItemConstructorOptions[] = [
-    ...(isMac
-      ? ([
-          {
-            label: app.name,
-            submenu: [
-              { role: 'about' },
-              { type: 'separator' },
-              { role: 'services' },
-              { type: 'separator' },
-              { role: 'hide' },
-              { role: 'hideOthers' },
-              { role: 'unhide' },
-              { type: 'separator' },
-              { role: 'quit' },
-            ],
-          },
-        ] as Electron.MenuItemConstructorOptions[])
-      : []),
-    {
-      label: 'Edit',
-      submenu: [
-        { role: 'undo' },
-        { role: 'redo' },
-        { type: 'separator' },
-        { role: 'cut' },
-        { role: 'copy' },
-        { role: 'paste' },
-        { role: 'selectAll' },
-      ],
-    },
-    tabMenu,
-    {
-      label: 'View',
-      submenu: [
-        { role: 'reload' },
-        { role: 'forceReload' },
-        { role: 'toggleDevTools' },
-        { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
-        { type: 'separator' },
-        { role: 'togglefullscreen' },
-      ],
-    },
-    {
-      label: 'Window',
-      submenu: [
-        { role: 'minimize' },
-        { role: 'zoom' },
-        ...(isMac
-          ? ([{ type: 'separator' }, { role: 'front' }] as Electron.MenuItemConstructorOptions[])
-          : []),
-      ],
-    },
-  ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
-}
+// ── App lifecycle ─────────────────────────────────────────────────────────────
 
 app.whenReady().then(() => {
   augmentPath();
-  // On Windows, verify that Node.js and npm are available on PATH.  If they
-  // are missing, agents cannot be installed and the app will silently fail.
-  // Show a friendly dialog instead of letting the user debug env issues.
+
   if (process.platform === 'win32') {
     const nodeOk = Boolean(
       (process.env.PATH ?? '').split(PATH_SEP).find((d) => d && existsSync(join(d, 'node.exe'))),
     );
     if (!nodeOk) {
-      // Show after window is created so it has a parent.
       app.once('browser-window-created', (_, win) => {
         void dialog.showMessageBox(win, {
           type: 'warning',
@@ -1419,94 +404,19 @@ app.whenReady().then(() => {
           buttons: ['Open nodejs.org', 'Continue without Node.js'],
           defaultId: 0,
         }).then(({ response }) => {
-          if (response === 0) {
-            void shell.openExternal('https://nodejs.org/en/download');
-          }
+          if (response === 0) void shell.openExternal('https://nodejs.org/en/download');
         });
       });
     }
   }
 
-  if (!existsSync(TDAY_DIR)) mkdirSync(TDAY_DIR, { recursive: true });
-  const agentsPath = join(TDAY_DIR, 'agents.json');
-  if (!existsSync(agentsPath)) {
-    writeFileSync(
-      agentsPath,
-      JSON.stringify(
-        {
-          agents: {
-            pi: { bin: 'pi', args: [], providerId: 'deepseek' },
-          },
-        },
-        null,
-        2,
-      ) + '\n',
-    );
-  }
-  const providersPath = join(TDAY_DIR, 'providers.json');
-  if (!existsSync(providersPath)) {
-    writeFileSync(
-      providersPath,
-      JSON.stringify(
-        {
-          default: 'deepseek',
-          profiles: [
-            {
-              id: 'deepseek',
-              label: 'DeepSeek',
-              kind: 'deepseek',
-              apiStyle: 'openai',
-              baseUrl: 'https://api.deepseek.com',
-              model: 'deepseek-v4-pro',
-              apiKey: '',
-            },
-            {
-              id: 'openai',
-              label: 'OpenAI',
-              kind: 'openai',
-              apiStyle: 'openai',
-              baseUrl: 'https://api.openai.com/v1',
-              model: 'gpt-5',
-              apiKey: '',
-            },
-            {
-              id: 'anthropic',
-              label: 'Anthropic',
-              kind: 'anthropic',
-              apiStyle: 'anthropic',
-              baseUrl: 'https://api.anthropic.com',
-              model: 'claude-sonnet-4-5',
-              apiKey: '',
-            },
-            {
-              id: 'openrouter',
-              label: 'OpenRouter',
-              kind: 'openrouter',
-              apiStyle: 'openai',
-              baseUrl: 'https://openrouter.ai/api/v1',
-              model: 'anthropic/claude-sonnet-4.5',
-              apiKey: '',
-            },
-          ],
-        },
-        null,
-        2,
-      ) + '\n',
-    );
-  }
+  initDefaultConfigs();
   electronApp.setAppUserModelId('com.tday.app');
-  app.on('browser-window-created', (_, w) => optimizer.watchWindowShortcuts(w));
-
-  // Install a custom menu so Cmd/Ctrl+T (new tab) and Cmd/Ctrl+W
-  // (close tab) are reserved for the renderer instead of being claimed
-  // by the default "Close Window"/"New Window" application-menu items.
+  watchWindowShortcuts();
+  setupPowerMonitor();
   installAppMenu();
-
   registerIpc();
-  // Start the CronJob scheduler with persisted jobs.
   cronScheduler.scheduleAll(loadCronJobs());
-  // Warm the session usage cache in the background so the first usageQuery
-  // is served from cache rather than triggering a cold full scan.
   triggerSessionCacheRefresh();
   createWindow();
 
@@ -1516,15 +426,15 @@ app.whenReady().then(() => {
 });
 
 app.on('before-quit', () => {
-  shuttingDown = true;
+  setShuttingDown(true);
   cronScheduler.destroy();
   localGatewayManager.close();
   killAllPtys();
-  if (caffeinateProc) { caffeinateProc.kill(); caffeinateProc = null; }
+  stopCaffeinate();
 });
 
 app.on('window-all-closed', () => {
-  shuttingDown = true;
+  setShuttingDown(true);
   cronScheduler.destroy();
   killAllPtys();
   if (process.platform !== 'darwin') app.quit();

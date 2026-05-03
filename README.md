@@ -570,6 +570,57 @@ git push origin v0.1.12
 
 ---
 
-## 11. License
+## 11. Renderer Modularity Rules
+
+The renderer follows **architectural constraints** enforced by ESLint (`eslint.config.mjs`) — the same philosophy as VS Code: prevent wrong structure from being possible, rather than capping line counts.
+
+### Layer rules (enforced)
+
+| Rule | What it prevents |
+|---|---|
+| Orchestrators (`Settings.tsx`, `App.tsx`) contain **no inline JSX UI logic** | State + prop wiring only; UI goes in Section/Widget files |
+| `*-helpers.ts` / `hooks/` contain **no JSX** | Pure logic stays pure |
+| `Settings/` sub-files import only from `@tday/shared`, `./types`, `./shared`, `./cron-helpers`, `./history-helpers`, or React — **never from `../../App`** | No upward coupling |
+| New visually distinct panels get their own `*Section.tsx` — **never added inline** to an existing file | Forces isolation at creation time |
+| Shared utilities used by 3+ components live in `shared.tsx` or a dedicated `*-helpers.ts` — **not copy-pasted** | Single source of truth |
+
+> ESLint rules: `no-restricted-imports` (no upward coupling), `@typescript-eslint/no-explicit-any` (warn), `prefer-const`. The CI `typecheck` + `test` scripts must stay green before merging.
+
+### Split triggers
+
+Apply these rules when adding or editing code:
+
+| Condition | Action |
+|---|---|
+| File approaches the line limit | Split: extract pure logic into `*-helpers.ts`, extract hook state into `hooks/use*.ts`, extract UI into a new `*Section.tsx` or `*Widget.tsx` |
+| 3+ components share the same utility | Move it to `shared.tsx` or a dedicated `*-helpers.ts` |
+| A hook exceeds ~100 lines | Extract sub-hooks |
+| Business logic lands in an orchestrator (`Settings.tsx`, `App.tsx`) | Move it down to the owning Section or hook |
+| A new visually distinct panel is added | It always gets its own `*Section.tsx` |
+
+### Settings module map
+
+```
+src/renderer/src/
+  Settings.tsx              ← orchestrator (~200 lines, state + props only)
+  Settings/
+    types.ts                ← Section / SchedMode / etc. — no JSX
+    shared.tsx              ← MiniMarkdown, SectionTab, Field, StatCard, DailyBarChart
+    cron-helpers.ts         ← parseCronSchedule, buildCronExpr, describeCronExpr
+    history-helpers.ts      ← histTimeGroup, histRelative, etc.
+    ProvidersSection.tsx    ← provider profiles, URL probe, model discovery
+    AgentsSection.tsx       ← agent list, per-agent config, shared settings
+    CronSection.tsx         ← cron job list + editor
+    UsageSection.tsx        ← token analytics dashboard
+    HistorySection.tsx      ← closed-tab history
+    ScheduleWidget.tsx      ← interval / at-time / custom cron picker
+    __tests__/
+      cron-helpers.test.ts
+      history-helpers.test.ts
+```
+
+---
+
+## 12. License
 
 MIT License
