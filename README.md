@@ -79,7 +79,29 @@ Today, every coding-agent harness ships with its own CLI, its own provider confi
 
 ---
 
-## 2. Architecture
+## 2. Key Features
+
+| # | Feature | Description |
+|---|---|---|
+| 1 | **Multi-tab workspace** | Open any agent in browser-style tabs, drag to reorder, multi-row wrap, per-tab working directory with cwd commit and last-cwd persistence. |
+| 2 | **Unified agent history** | Every session across all agents is automatically indexed. Browse, search, and restore any past conversation — including working directory and session ID — with one click. |
+| 3 | **Cross-agent usage analytics** | Complete token and cost tracking for every agent and every session. Daily bar chart, by-model and by-agent breakdown tables, 30+ model pricing — all stored locally in SQLite. |
+| 4 | **9 AI agent adapters** | Pi, Claude Code, Codex CLI, GitHub Copilot CLI, OpenCode, Gemini CLI, Qwen-Code, Crush, Hermes — each with auto-detect, one-click install, and per-agent accent color. |
+| 5 | **CoWorker system** | Reusable role personas (Karpathy Code Guidelines, Devin-style Planner, Earnings Call Analyst, 8 built-in engineer roles, or your own) injected as system prompts — selected per tab from the CwdBar, effective immediately. |
+| 6 | **Cron job scheduler** | Schedule automated agent tasks with Interval / At Time / Custom cron modes. Human-readable preview, enable/disable, clone, delete, and a live dashboard with next-run countdown and last-status. |
+| 7 | **28-provider settings panel** | CRUD UI for DeepSeek, OpenAI, Anthropic, Gemini, xAI, Groq, Mistral, Ollama, LM Studio, OpenRouter, and 18 more — supports both OpenAI-compatible and Anthropic-compatible base URLs. |
+| 8 | **Per-agent provider & model binding** | Each agent tab runs on a different provider and model. Model flags are projected to CLI arguments at spawn time. Shared-config "all agents one provider" toggle also available. |
+| 9 | **Local inference auto-discovery** | TCP + HTTP fingerprint scan for Ollama, LM Studio, vLLM, llama.cpp, SGLang, LocalAI, Jan. Discovered models appear as chips in the provider UI. Manual base-URL probe available. |
+| 10 | **Agent-native session resume** | Claude Code (`--resume`), Codex (`resume <id>`), OpenCode (`--session`) — session IDs are captured automatically and offered on tab restore. |
+| 11 | **Reliable prompt delivery** | Task prompts reach the agent at spawn time even when the screen is locked: CLI arg for Codex / Claude Code / OpenCode / Gemini / Qwen-Code; bracketed-paste PTY write for Pi / Copilot / Crush / Hermes. |
+| 12 | **DeepSeek Anthropic gateway proxy** | In-process HTTP server translating OpenAI Responses API → Anthropic Messages API: streaming, extended thinking, tool use, multi-turn — no harness patching required. |
+| 13 | **Keep Awake** | One-click toggle to block system sleep during long agent jobs, without affecting screen dimming. |
+| 14 | **In-app update checker** | Green dot badge and download link when a new version is available — checked 10 s after launch then every 30 min. |
+| 15 | **Cross-platform** | macOS (arm64 + x64), Windows, Linux. PATH augmentation for nvm-windows, Volta, fnm. Correct PTY dimensions on all platforms. |
+
+---
+
+## 3. Architecture
 
 ```
 ┌──────────────────────── Tday Desktop App ────────────────────────┐
@@ -182,7 +204,7 @@ A **Tab** owns one **Session** = one PTY process bound to one agent adapter, one
 
 ---
 
-## 3. Long-term Roadmap
+## 4. Long-term Roadmap
 
 | Version | Theme | Highlights |
 |---|---|---|
@@ -209,7 +231,7 @@ A **Tab** owns one **Session** = one PTY process bound to one agent adapter, one
 
 ---
 
-## 4. Detailed Task Breakdown
+## 5. Detailed Task Breakdown
 
 ### v0.1.0 — Pi end-to-end ✅
 
@@ -444,7 +466,7 @@ Define reusable instruction files that are automatically injected into agent ses
 
 ---
 
-## 5. Repository Layout
+## 6. Repository Layout
 
 ```
 tday/
@@ -472,7 +494,7 @@ tday/
 
 ---
 
-## 6. Quickstart
+## 7. Quickstart
 
 ```bash
 # prerequisites
@@ -494,7 +516,7 @@ The first window opens with a single tab running `pi` inside a real PTY.
 
 ---
 
-## 7. Build and Release
+## 8. Build and Release
 
 ### Local build
 
@@ -539,7 +561,7 @@ git push origin v0.1.12
 
 ---
 
-## 8. Design principles
+## 9. Design principles
 
 1. **Native where it matters.** PTY, tokenization, memory, scanners — all in Rust or `node-pty`. Electron is the chrome, never the bottleneck.
 2. **Adapter-first.** Adding a new harness must be ≤ 100 LOC.
@@ -548,7 +570,7 @@ git push origin v0.1.12
 5. **Don’t hide the terminal.** It’s a terminal. Keystrokes, escape codes, colors, mouse — all forwarded faithfully.
 
 ---
-## 9. Supported Harness Agents
+## 10. Supported Harness Agents
 
 | Agent | Install | Notes |
 |---|---|---|
