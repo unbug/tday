@@ -193,7 +193,7 @@ export function CronSection({
             <div className="flex items-center gap-2 pt-2">
               <button
                 onClick={() => void onSave()}
-                disabled={saving || !draft.name?.trim() || !draft.schedule?.trim()}
+                disabled={saving || !draft.schedule?.trim()}
                 className="rounded-md bg-fuchsia-500/90 px-4 py-1.5 text-xs font-medium text-white hover:bg-fuchsia-500 disabled:opacity-50"
               >
                 {saving ? 'Saving…' : 'Save'}

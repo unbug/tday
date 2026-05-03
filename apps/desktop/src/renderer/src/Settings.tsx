@@ -7,6 +7,7 @@ import { AgentsSection } from './Settings/AgentsSection';
 import { UsageSection } from './Settings/UsageSection';
 import { HistorySection } from './Settings/HistorySection';
 import { CronSection } from './Settings/CronSection';
+import { describeCronExpr } from './Settings/cron-helpers';
 
 interface Props {
   open: boolean;
@@ -132,16 +133,22 @@ export function Settings({
   const handleCronSave = useCallback(async () => {
     setCronSaving(true);
     try {
+      // Auto-generate a name from the schedule description when the user
+      // didn't provide one, so they can save without filling in a name.
+      const effectiveDraft: Partial<CronJob> =
+        cronDraft.name?.trim()
+          ? cronDraft
+          : { ...cronDraft, name: describeCronExpr(cronDraft.schedule ?? '') || 'Cron job' };
       let updated: CronJob[];
       if (cronEditId === '__new__') {
         const newJob: CronJob = {
           id: `cron-${Date.now()}`,
           createdAt: Date.now(),
-          ...(cronDraft as Omit<CronJob, 'id' | 'createdAt'>),
+          ...(effectiveDraft as Omit<CronJob, 'id' | 'createdAt'>),
         };
         updated = [...cronJobs, newJob];
       } else {
-        updated = cronJobs.map((j) => (j.id === cronEditId ? { ...j, ...cronDraft } as CronJob : j));
+        updated = cronJobs.map((j) => (j.id === cronEditId ? { ...j, ...effectiveDraft } as CronJob : j));
       }
       await window.tday.saveCronJobs(updated);
       const [jobs, stats] = await Promise.all([window.tday.listCronJobs(), window.tday.getCronStats()]);
@@ -249,7 +256,7 @@ export function Settings({
               onOpenNew={handleCronOpenNew}
               onOpenEdit={handleCronOpenEdit}
               onCloseEdit={handleCronCloseEdit}
-              onDraftChange={setCronDraft}
+              onDraftChange={(patch) => setCronDraft((prev) => ({ ...prev, ...patch }))}
               onSave={handleCronSave}
               onClone={handleCronClone}
               onDelete={handleCronDelete}
