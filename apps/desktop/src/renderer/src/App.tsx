@@ -89,7 +89,7 @@ export default function App() {
         () => initKeepAwake(true),
       );
 
-      maybeAutoInstall(h, list, setAgentList);
+      maybeAutoInstall(h, list, setAgentList, def);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -163,17 +163,28 @@ export default function App() {
                 className="h-full w-full"
                 style={{ display: t.id === activeId ? 'block' : 'none' }}
               >
-                <Terminal
-                  key={`${t.id}:${t.epoch}`}
-                  tabId={t.id}
-                  agentId={t.agentId}
-                  cwd={t.cwd}
-                  active={t.id === activeId}
-                  agentSessionId={t.agentSessionId}
-                  initialPrompt={t.initialPrompt}
-                  isCronJob={t.isCronJob}
-                  onAgentSessionId={(id) => updateTabSessionId(t.id, id)}
-                />
+                {/* While Pi is being auto-installed, withhold the Terminal so it
+                    doesn't try to spawn an unavailable binary and show a stale
+                    "failed to spawn" error beneath the install progress bar.
+                    Once `installing` flips to false the Terminal mounts fresh
+                    and spawns into the newly-installed binary. */}
+                {installing && t.agentId === 'pi' ? (
+                  <div className="flex h-full items-center justify-center">
+                    <span className="text-xs text-zinc-700">Installing Pi agent…</span>
+                  </div>
+                ) : (
+                  <Terminal
+                    key={`${t.id}:${t.epoch}`}
+                    tabId={t.id}
+                    agentId={t.agentId}
+                    cwd={t.cwd}
+                    active={t.id === activeId}
+                    agentSessionId={t.agentSessionId}
+                    initialPrompt={t.initialPrompt}
+                    isCronJob={t.isCronJob}
+                    onAgentSessionId={(id) => updateTabSessionId(t.id, id)}
+                  />
+                )}
               </div>
             ))}
           </div>

@@ -11,6 +11,8 @@ files:
 asar: true
 asarUnpack:
   - "**/node_modules/node-pty/**/*"
+
+# ── macOS ──────────────────────────────────────────────────────────────────────
 mac:
   category: public.app-category.developer-tools
   icon: build/icon.icns
@@ -27,6 +29,8 @@ mac:
   hardenedRuntime: false
   gatekeeperAssess: false
   identity: null
+
+# ── Windows ────────────────────────────────────────────────────────────────────
 win:
   target:
     - target: nsis
@@ -36,6 +40,17 @@ win:
       arch:
         - x64
   artifactName: "Tday-${version}-win-${arch}.${ext}"
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  runAfterFinish: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Tday
+
+# ── Linux ──────────────────────────────────────────────────────────────────────
 linux:
   category: Development
   executableName: Tday
@@ -47,6 +62,8 @@ linux:
       arch:
         - x64
   artifactName: "Tday-${version}-linux-${arch}.${ext}"
+
+# ── DMG (macOS only) ───────────────────────────────────────────────────────────
 dmg:
   artifactName: "Tday-${version}-mac-${arch}.${ext}"
   writeUpdateInfo: false

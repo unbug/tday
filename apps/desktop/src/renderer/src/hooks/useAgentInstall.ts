@@ -9,8 +9,12 @@ export interface AgentInstallHook {
   installLog: string;
   refreshAgents: (setAgentList: (list: AgentInfo[]) => void) => Promise<boolean>;
   installPi: (setAgentList: (list: AgentInfo[]) => void) => Promise<void>;
-  /** Call once after initial agentList + settings are loaded to auto-install if needed. */
-  maybeAutoInstall: (home: string, agentList: AgentInfo[], setAgentList: (list: AgentInfo[]) => void) => void;
+  /**
+   * Call once after initial agentList + settings are loaded to auto-install if needed.
+   * Only attempts to auto-install Pi when it is the configured default agent.
+   * Pass `defaultAgentId` so that other agents' startup logic is not affected.
+   */
+  maybeAutoInstall: (home: string, agentList: AgentInfo[], setAgentList: (list: AgentInfo[]) => void, defaultAgentId?: AgentId) => void;
 }
 
 export function useAgentInstall(): AgentInstallHook {
@@ -59,14 +63,29 @@ export function useAgentInstall(): AgentInstallHook {
     home: string,
     agentList: AgentInfo[],
     setAgentList: (list: AgentInfo[]) => void,
+    defaultAgentId: AgentId = 'pi',
   ): void => {
     if (checkedRef.current) return;
     if (!home || home === '~') return;
     checkedRef.current = true;
-    const piAvailable = !!(agentList.find((a) => a.id === 'pi')?.detect?.available);
-    if (!piAvailable) {
-      void installPi(setAgentList);
-    }
+
+    // If the configured default agent is already available, nothing to do.
+    if (agentList.find((a: AgentInfo) => a.id === defaultAgentId)?.detect?.available) return;
+
+    // Only auto-install Pi when Pi is the configured (or implicit) default.
+    // If the user has explicitly chosen another agent, respect that and do not
+    // touch anything — they should install their chosen agent themselves.
+    if (defaultAgentId !== 'pi') return;
+
+    // Even when Pi is the configured default, skip the auto-install if any
+    // other agent is already available on the system. initDefaultConfigs()
+    // normally handles this on first launch, but guard here too for configs
+    // written before this logic was introduced.
+    if (agentList.some((a: AgentInfo) => a.detect?.available)) return;
+
+    // Nothing is installed at all: auto-install Pi (the only agent with a
+    // fully automated installer inside Tday).
+    void installPi(setAgentList);
   }, [installPi]);
 
   return { installing, installPct, installStatus, installLog, refreshAgents, installPi, maybeAutoInstall };

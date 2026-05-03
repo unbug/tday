@@ -9,9 +9,44 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { normalizeProvidersConfig } from './provider-utils.js';
-import type { AgentsConfig, ProvidersConfig } from '@tday/shared';
+import { detectGeneric } from './agent-utils.js';
+import type { AgentsConfig, ProvidersConfig, AgentId } from '@tday/shared';
 
 export const TDAY_DIR = join(homedir(), '.tday');
+
+/**
+ * Priority-ordered list of agents to probe on first launch.
+ * The first binary found on PATH becomes the configured default.
+ * Pi is intentionally last — it is the auto-install fallback for fresh
+ * systems where nothing else is installed yet.
+ *
+ * On Windows, codex and claude-code are placed first because they have
+ * the most robust Windows PATH setup and ConPTY support.
+ */
+const DETECT_PRIORITY: Array<{ id: AgentId; bin: string }> = [
+  { id: 'codex',       bin: 'codex' },
+  { id: 'claude-code', bin: 'claude' },
+  { id: 'opencode',    bin: 'opencode' },
+  { id: 'gemini',      bin: 'gemini' },
+  { id: 'qwen-code',   bin: 'qwen' },
+  { id: 'crush',       bin: 'crush' },
+  { id: 'hermes',      bin: 'hermes' },
+  { id: 'pi',          bin: 'pi' },
+];
+
+/**
+ * Scan PATH for known agents and return the id of the first one found.
+ * Falls back to 'pi' (which triggers auto-install) if nothing is detected.
+ * Called only on first launch when agents.json does not exist yet.
+ */
+function detectBestDefaultAgent(): AgentId {
+  for (const { id, bin } of DETECT_PRIORITY) {
+    try {
+      if (detectGeneric(bin).available) return id;
+    } catch { /* ignore per-binary failures */ }
+  }
+  return 'pi';
+}
 
 export function readJson<T>(path: string, fallback: T): T {
   try {
@@ -44,18 +79,20 @@ export function initDefaultConfigs(): void {
 
   const agentsPath = join(TDAY_DIR, 'agents.json');
   if (!existsSync(agentsPath)) {
-    writeFileSync(
-      agentsPath,
-      JSON.stringify(
-        {
-          agents: {
-            pi: { bin: 'pi', args: [], providerId: 'deepseek' },
-          },
-        },
-        null,
-        2,
-      ) + '\n',
-    );
+    // Probe PATH for the best available agent so that users who already have
+    // codex, claude-code, etc. installed don't get an unwanted Pi auto-install.
+    const bestDefault = detectBestDefaultAgent();
+    const agentsConfig: Record<string, unknown> = {
+      agents: {
+        pi: { bin: 'pi', args: [], providerId: 'deepseek' },
+      },
+    };
+    // Only write the field when it's not the implicit default so existing
+    // consumers that fall back to 'pi' on missing key still work.
+    if (bestDefault !== 'pi') {
+      agentsConfig.defaultAgentId = bestDefault;
+    }
+    writeFileSync(agentsPath, JSON.stringify(agentsConfig, null, 2) + '\n');
   }
 
   const providersPath = join(TDAY_DIR, 'providers.json');

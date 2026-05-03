@@ -57,6 +57,7 @@ import {
   resolveExecutable,
   normalizeLaunchCwd,
   modelFlagsFor,
+  windowsCmdWrap,
 } from './agent-utils.js';
 import { ensureFd } from './fd-install.js';
 import { ptys, shuttingDown, setShuttingDown, killAllPtys } from './pty-manager.js';
@@ -257,7 +258,11 @@ function registerIpc(): void {
       );
     }
 
-    const pty = spawnPty(resolved.resolved, args, {
+    // On Windows, node-pty (ConPTY / CreateProcess) cannot execute .cmd
+    // or .bat files directly — wrap them in cmd.exe /c if needed.
+    const { file: spawnFile, args: spawnArgs } = windowsCmdWrap(resolved.resolved, args);
+
+    const pty = spawnPty(spawnFile, spawnArgs, {
       name: 'xterm-256color',
       cols: req.cols,
       rows: req.rows,

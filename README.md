@@ -47,6 +47,21 @@ Or:
 
 <img width="968" height="716" alt="Image" src="https://github.com/user-attachments/assets/116d2b64-23e6-4a35-8409-1310fe8ecfcd" />
 
+### Windows — "Windows protected your PC" warning
+
+The build is **not code-signed** with a Microsoft Authenticode certificate. Windows SmartScreen may show a warning. To bypass:
+
+1. Click **More info** in the SmartScreen dialog.
+2. Click **Run anyway**.
+
+> **Prerequisites:** Tday requires **Node.js (LTS, >=20)** to install and run AI coding agents. Download it from [nodejs.org](https://nodejs.org/en/download). After installation, make sure `npm` is on your PATH by running `npm --version` in a new terminal — if it works, Tday will also find it.
+
+> **PATH setup:** If you installed agents via `npm install -g <package>`, their `.cmd` wrapper scripts live in `%APPDATA%\npm`. The Tday installer does not modify your system PATH — the app detects this directory automatically at startup. If Tday can't find an agent, run:
+> ```cmd
+> npm install -g <agent-package>
+> ```
+> then restart Tday.
+
 ---
 
 ## 1. Vision

@@ -5,6 +5,7 @@
  *  - INSTALL_SPECS: per-agent npm package metadata
  *  - detectGeneric(): check if a binary is on PATH + get its version
  *  - resolveExecutable(): resolve a binary name to its absolute path
+ *  - windowsCmdWrap(): wrap .cmd/.bat invocations for node-pty on Windows
  *  - semverAtLeast(): semver comparison helper
  *  - normalizeLaunchCwd(): validate/normalize a working directory
  *  - opencodeProviderId(): map ProviderKind → opencode provider id
@@ -109,17 +110,33 @@ export const INSTALL_SPECS: Record<AgentId, AgentInstallSpec | undefined> = {
 
 /**
  * Generic detect: which $bin + try --version with a short timeout.
+ *
+ * On Windows, `where` returns .cmd/.bat paths.  The version check wraps
+ * those in `cmd.exe /c` because CreateProcess cannot execute them directly.
  */
 export function detectGeneric(bin: string): { available: boolean; version?: string; error?: string } {
   try {
     const whichCmd = process.platform === 'win32' ? 'where' : 'which';
-    const path = execFileSync(whichCmd, [bin], { encoding: 'utf8' }).split(/\r?\n/)[0].trim();
-    if (!path) return { available: false };
+    const raw = execFileSync(whichCmd, [bin], { encoding: 'utf8' }).split(/\r?\n/)[0].trim();
+    if (!raw) return { available: false };
     let version: string | undefined;
     try {
-      version = execFileSync(path, ['--version'], { encoding: 'utf8', timeout: 2_000 }).trim();
+      // On Windows, .cmd/.bat files cannot be executed directly by
+      // CreateProcess — wrap in cmd.exe /c for the version probe.
+      if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(raw)) {
+        version = execFileSync(
+          'cmd.exe',
+          ['/c', raw, '--version'],
+          { encoding: 'utf8', timeout: 2_000 },
+        ).trim();
+      } else {
+        version = execFileSync(raw, ['--version'], {
+          encoding: 'utf8',
+          timeout: 2_000,
+        }).trim();
+      }
     } catch {
-      // version is optional
+      // version is optional — detection should not fail just because of this
     }
     return { available: true, version };
   } catch {
@@ -129,6 +146,13 @@ export function detectGeneric(bin: string): { available: boolean; version?: stri
 
 // ── Executable resolution ─────────────────────────────────────────────────────
 
+/**
+ * Resolve a binary name to its absolute path by searching PATH.
+ *
+ * On Windows, suffixes ''.exe'', ''.cmd'' and ''.bat'' are tried in order
+ * so that npm-global .cmd wrappers are found before falling back to
+ * which/where.
+ */
 export function resolveExecutable(
   bin: string,
   env: NodeJS.ProcessEnv,
@@ -149,6 +173,8 @@ export function resolveExecutable(
     }
   }
 
+  // Last-resort: try which/where (may find files outside PATH dirs, e.g.
+  // registered App Paths on Windows).
   try {
     const whichCmd = process.platform === 'win32' ? 'where' : 'which';
     const resolved = execFileSync(whichCmd, [bin], {
@@ -160,6 +186,46 @@ export function resolveExecutable(
   } catch {
     return { requested: bin, resolved: null };
   }
+}
+
+// ── Windows .cmd / .bat wrapper ────────────────────────────────────────────
+
+/**
+ * Node-pty on Windows uses the native ConPTY API which calls CreateProcess
+ * internally.  CreateProcess does NOT handle .cmd or .bat files — it only
+ * understands PE executables (.exe, .com, .dll as a process).
+ *
+ * npm global binaries on Windows are .cmd wrapper scripts
+ * (e.g. `%APPDATA%\npm\pi.cmd`).  When the resolved binary is a .cmd/.bat
+ * file, this function rewrites the invocation so that node-pty receives:
+ *
+ *     cmd.exe /c "<resolved>" <original-args...>
+ *
+ * For non-Windows platforms or native .exe files this is a no-op.
+ *
+ * @returns The (file, args) pair to pass to node-pty's spawn().
+ */
+export function windowsCmdWrap(
+  file: string,
+  args: string[],
+): { file: string; args: string[] } {
+  if (process.platform !== 'win32') {
+    return { file, args };
+  }
+
+  // Already an .exe — no wrapping needed.
+  if (/\.exe$/i.test(file)) {
+    return { file, args };
+  }
+
+  // .cmd and .bat wrappers: delegate to cmd.exe /c.
+  if (/\.(cmd|bat)$/i.test(file)) {
+    return { file: 'cmd.exe', args: ['/c', file, ...args] };
+  }
+
+  // No recognised extension; pass through — node-pty / CreateProcess may
+  // still handle it, or it will fail with a clear error.
+  return { file, args };
 }
 
 export function normalizeLaunchCwd(cwd: string | undefined): string {

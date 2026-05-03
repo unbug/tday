@@ -140,6 +140,7 @@ export function Terminal({ tabId, agentId, cwd, active, agentSessionId, onAgentS
 
       const spawnCols = term.cols;
       const spawnRows = term.rows;
+      const isWindows = window.tday.platform === 'win32';
       await window.tday
         .spawn({
           tabId,
@@ -163,6 +164,13 @@ export function Terminal({ tabId, agentId, cwd, active, agentSessionId, onAgentS
           term.writeln(
             `\x1b[2mset ~/.tday/agents.json → { "agents": { "${agentId}": { "bin": "/absolute/path/to/${agentId === 'claude-code' ? 'claude' : agentId === 'copilot' ? 'copilot' : agentId}" } } }\x1b[0m`,
           );
+          if (isWindows) {
+            term.writeln(
+              `\x1b[33m\u2139\uFE0F Windows tip:\x1b[0m \x1b[2mMake sure the agent binary is on your PATH.` +
+              ` If installed via npm, try running \`npm install -g ${agentId}\` in a terminal,` +
+              ` then restart Tday.  See the README for Windows PATH setup.\x1b[0m`,
+            );
+          }
         });
 
       // Re-sync only if the terminal was resized while waiting for spawn.
@@ -172,7 +180,6 @@ export function Terminal({ tabId, agentId, cwd, active, agentSessionId, onAgentS
       if (term.cols !== spawnCols || term.rows !== spawnRows) {
         void window.tday.resize(tabId, term.cols, term.rows);
       }
-
     };
 
     void init();
