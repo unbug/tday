@@ -60,6 +60,7 @@ import {
   normalizeLaunchCwd,
   modelFlagsFor,
   windowsCmdWrap,
+  deepseekTuiProviderEnv,
 } from './agent-utils.js';
 import { ensureFd } from './fd-install.js';
 import { ptys, shuttingDown, setShuttingDown, killAllPtys } from './pty-manager.js';
@@ -267,9 +268,10 @@ function registerIpc(): void {
 
       if (req.agentSessionId) {
         switch (req.agentId) {
-          case 'claude-code': args = ['--resume', req.agentSessionId, ...args]; break;
-          case 'codex':       args = ['resume', req.agentSessionId]; break;
-          case 'opencode':    args = ['--session', req.agentSessionId, ...args]; break;
+          case 'claude-code':   args = ['--resume', req.agentSessionId, ...args]; break;
+          case 'codex':         args = ['resume', req.agentSessionId]; break;
+          case 'opencode':      args = ['--session', req.agentSessionId, ...args]; break;
+          case 'deepseek-tui':  args = ['resume', req.agentSessionId, ...args]; break;
           default: break;
         }
       }
@@ -280,7 +282,7 @@ function registerIpc(): void {
       }
 
       const CLI_PROMPT_AGENTS: AgentId[] = [
-        'codex', 'claude-code', 'gemini', 'qwen-code',
+        'codex', 'claude-code', 'gemini', 'qwen-code', 'deepseek-tui',
         ...(req.isCronJob ? (['opencode'] as AgentId[]) : []),
       ];
       const sentViaCliArg = !!(
@@ -289,6 +291,9 @@ function registerIpc(): void {
       if (sentViaCliArg && initialPrompt) args = [...args, initialPrompt];
 
       env = piLike.env;
+      if (req.agentId === 'deepseek-tui' && effectiveProvider) {
+        Object.assign(env, deepseekTuiProviderEnv(effectiveProvider.kind, effectiveProvider.apiKey, effectiveProvider.baseUrl));
+      }
       if (gatewayResolution?.noProxyHosts?.length) appendNoProxy(env, gatewayResolution.noProxyHosts);
       launchCwd = normalizeLaunchCwd(piLike.cwd);
     }
@@ -321,7 +326,7 @@ function registerIpc(): void {
 
     const initialPromptForPty = req.initialPrompt?.trim();
     const _cliAgents: AgentId[] = [
-      'codex', 'claude-code', 'gemini', 'qwen-code',
+      'codex', 'claude-code', 'gemini', 'qwen-code', 'deepseek-tui',
       // For cron jobs: opencode uses 'run' subcommand, pi uses positional arg — both skip PTY write
       ...(req.isCronJob ? (['opencode', 'pi'] as AgentId[]) : []),
     ];

@@ -13,6 +13,7 @@ export type AgentId =
   | 'qwen-code'
   | 'crush'
   | 'hermes'
+  | 'deepseek-tui'
   | 'terminal';
 
 /**

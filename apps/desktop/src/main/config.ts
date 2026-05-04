@@ -24,14 +24,15 @@ export const TDAY_DIR = join(homedir(), '.tday');
  * the most robust Windows PATH setup and ConPTY support.
  */
 const DETECT_PRIORITY: Array<{ id: AgentId; bin: string }> = [
-  { id: 'codex',       bin: 'codex' },
-  { id: 'claude-code', bin: 'claude' },
-  { id: 'opencode',    bin: 'opencode' },
-  { id: 'gemini',      bin: 'gemini' },
-  { id: 'qwen-code',   bin: 'qwen' },
-  { id: 'crush',       bin: 'crush' },
-  { id: 'hermes',      bin: 'hermes' },
-  { id: 'pi',          bin: 'pi' },
+  { id: 'codex',         bin: 'codex' },
+  { id: 'claude-code',   bin: 'claude' },
+  { id: 'opencode',      bin: 'opencode' },
+  { id: 'gemini',        bin: 'gemini' },
+  { id: 'qwen-code',     bin: 'qwen' },
+  { id: 'crush',         bin: 'crush' },
+  { id: 'hermes',        bin: 'hermes' },
+  { id: 'deepseek-tui',  bin: 'deepseek' },
+  { id: 'pi',            bin: 'pi' },
 ];
 
 /**

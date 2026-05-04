@@ -104,6 +104,13 @@ export const INSTALL_SPECS: Record<AgentId, AgentInstallSpec | undefined> = {
     description: 'Hermes coding agent — install manually and ensure `hermes` is on PATH',
     bin: 'hermes',
   },
+  'deepseek-tui': {
+    agentId: 'deepseek-tui',
+    displayName: 'DeepSeek TUI',
+    description: 'Hmbown/DeepSeek-TUI terminal coding agent (npm: deepseek-tui)',
+    npmPackage: 'deepseek-tui',
+    bin: 'deepseek',
+  },
   terminal: undefined,
 };
 
@@ -335,8 +342,49 @@ export function modelFlagsFor(
       return ['--model', model];
     case 'crush':
     case 'hermes':
+    case 'deepseek-tui':
     case 'pi':
     default:
       return [];
   }
+}
+
+// ── DeepSeek-TUI provider env ─────────────────────────────────────────────────
+
+/**
+ * Map tday's ProviderKind to the env vars that DeepSeek-TUI expects.
+ *
+ * DeepSeek-TUI uses DEEPSEEK_PROVIDER to select the upstream backend
+ * (deepseek / nvidia-nim / fireworks). The API key env var name varies
+ * per backend; we inject whichever one the tool actually reads.
+ */
+export function deepseekTuiProviderEnv(
+  kind: string | undefined,
+  apiKey: string | undefined,
+  baseUrl: string | undefined,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  switch (kind) {
+    case 'deepseek':
+      out.DEEPSEEK_PROVIDER = 'deepseek';
+      if (apiKey) out.DEEPSEEK_API_KEY = apiKey;
+      if (baseUrl) out.DEEPSEEK_BASE_URL = baseUrl;
+      break;
+    case 'nvidia':
+      out.DEEPSEEK_PROVIDER = 'nvidia-nim';
+      if (apiKey) out.NVIDIA_API_KEY = apiKey;
+      if (baseUrl) out.NVIDIA_BASE_URL = baseUrl;
+      break;
+    case 'fireworks':
+      out.DEEPSEEK_PROVIDER = 'fireworks';
+      if (apiKey) out.FIREWORKS_API_KEY = apiKey;
+      break;
+    default:
+      // Generic fallback: propagate whatever key/url PiAdapter already set,
+      // and let the tool decide (DEEPSEEK_API_KEY + DEEPSEEK_BASE_URL).
+      if (apiKey) out.DEEPSEEK_API_KEY = apiKey;
+      if (baseUrl) out.DEEPSEEK_BASE_URL = baseUrl;
+      break;
+  }
+  return out;
 }

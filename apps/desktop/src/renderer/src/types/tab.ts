@@ -75,6 +75,7 @@ export function agentTitle(id: AgentId): string {
     case 'qwen-code':   return 'Qwen';
     case 'crush':       return 'Crush';
     case 'hermes':      return 'Hermes';
+    case 'deepseek-tui': return 'DeepSeek';
     case 'terminal':    return 'Terminal';
   }
 }
@@ -90,6 +91,7 @@ export function agentColor(id: AgentId): string {
     case 'qwen-code':   return '#f472b6'; // pink
     case 'crush':       return '#fb7185'; // rose
     case 'hermes':      return '#fbbf24'; // amber
+    case 'deepseek-tui': return '#06b6d4'; // cyan-500
     case 'terminal':    return '#6b7280'; // gray
   }
 }
