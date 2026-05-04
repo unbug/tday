@@ -64,36 +64,55 @@ export function newTab(cwd: string, agentId: AgentId = 'pi', title?: string): Ta
   };
 }
 
+export const AGENT_TITLE_MAP: Record<AgentId, string> = {
+  pi: 'Pi',
+  'claude-code': 'Claude',
+  codex: 'Codex',
+  copilot: 'Copilot',
+  opencode: 'OpenCode',
+  gemini: 'Gemini',
+  'qwen-code': 'Qwen',
+  crush: 'Crush',
+  hermes: 'Hermes',
+  'deepseek-tui': 'DeepSeekTUI',
+  terminal: 'Terminal',
+};
+
+export const AGENT_COLOR_MAP: Record<AgentId, string> = {
+  pi: '#a78bfa',
+  'claude-code': '#f97316',
+  codex: '#788bff',
+  copilot: '#60a5fa',
+  opencode: '#34d399',
+  gemini: '#4ade80',
+  'qwen-code': '#f472b6',
+  crush: '#fb7185',
+  hermes: '#fbbf24',
+  'deepseek-tui': '#4D6BFE',
+  terminal: '#6b7280',
+};
+
+/** All agent IDs usable in scheduled jobs (excludes 'terminal'). */
+export const SCHEDULABLE_AGENT_IDS = (Object.keys(AGENT_TITLE_MAP) as AgentId[]).filter(
+  (id) => id !== 'terminal',
+);
+
 export function agentTitle(id: AgentId): string {
-  switch (id) {
-    case 'pi':          return 'Pi';
-    case 'claude-code': return 'Claude';
-    case 'codex':       return 'Codex';
-    case 'copilot':     return 'Copilot';
-    case 'opencode':    return 'OpenCode';
-    case 'gemini':      return 'Gemini';
-    case 'qwen-code':   return 'Qwen';
-    case 'crush':       return 'Crush';
-    case 'hermes':      return 'Hermes';
-    case 'deepseek-tui': return 'DeepSeek';
-    case 'terminal':    return 'Terminal';
-  }
+  return AGENT_TITLE_MAP[id];
 }
 
 export function agentColor(id: AgentId): string {
-  switch (id) {
-    case 'pi':          return '#a78bfa'; // violet
-    case 'claude-code': return '#f97316'; // orange
-    case 'codex':       return '#22d3ee'; // cyan
-    case 'copilot':     return '#60a5fa'; // blue
-    case 'opencode':    return '#34d399'; // emerald
-    case 'gemini':      return '#4ade80'; // green
-    case 'qwen-code':   return '#f472b6'; // pink
-    case 'crush':       return '#fb7185'; // rose
-    case 'hermes':      return '#fbbf24'; // amber
-    case 'deepseek-tui': return '#06b6d4'; // cyan-500
-    case 'terminal':    return '#6b7280'; // gray
-  }
+  return AGENT_COLOR_MAP[id];
+}
+
+/** agentTitle for arbitrary string IDs — returns the raw id for unknowns. */
+export function agentTitleFor(id: string): string {
+  return (AGENT_TITLE_MAP as Record<string, string>)[id] ?? id;
+}
+
+/** agentColor for arbitrary string IDs — returns '#71717a' for unknowns. */
+export function agentColorFor(id: string): string {
+  return (AGENT_COLOR_MAP as Record<string, string>)[id] ?? '#71717a';
 }
 
 export function loadPersistedTabsFromRaw(raw: unknown): PersistedTab[] {

@@ -106,7 +106,7 @@ export const INSTALL_SPECS: Record<AgentId, AgentInstallSpec | undefined> = {
   },
   'deepseek-tui': {
     agentId: 'deepseek-tui',
-    displayName: 'DeepSeek TUI',
+    displayName: 'DeepSeekTUI',
     description: 'Hmbown/DeepSeek-TUI terminal coding agent (npm: deepseek-tui)',
     npmPackage: 'deepseek-tui',
     bin: 'deepseek',
@@ -340,9 +340,10 @@ export function modelFlagsFor(
     }
     case 'copilot':
       return ['--model', model];
+    case 'deepseek-tui':
+      return ['--model', model];
     case 'crush':
     case 'hermes':
-    case 'deepseek-tui':
     case 'pi':
     default:
       return [];

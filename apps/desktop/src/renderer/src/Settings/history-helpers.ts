@@ -1,33 +1,19 @@
-export const HIST_AGENT_LABEL: Record<string, string> = {
-  pi: 'Pi',
-  'claude-code': 'Claude',
-  codex: 'Codex',
-  copilot: 'Copilot',
-  opencode: 'OpenCode',
-  gemini: 'Gemini',
-  'qwen-code': 'Qwen',
-  crush: 'Crush',
-  hermes: 'Hermes',
-};
+import { AGENT_TITLE_MAP, AGENT_COLOR_MAP, agentTitleFor, agentColorFor } from '../types/tab';
 
-export const HIST_AGENT_COLOR: Record<string, string> = {
-  pi: '#a78bfa',
-  'claude-code': '#f97316',
-  codex: '#22d3ee',
-  copilot: '#60a5fa',
-  opencode: '#34d399',
-  gemini: '#4ade80',
-  'qwen-code': '#f472b6',
-  crush: '#fb7185',
-  hermes: '#fbbf24',
-};
+export const HIST_AGENT_LABEL: Record<string, string> = Object.fromEntries(
+  Object.entries(AGENT_TITLE_MAP).filter(([id]) => id !== 'terminal'),
+);
+
+export const HIST_AGENT_COLOR: Record<string, string> = Object.fromEntries(
+  Object.entries(AGENT_COLOR_MAP).filter(([id]) => id !== 'terminal'),
+);
 
 export function histAgentLabel(id: string): string {
-  return HIST_AGENT_LABEL[id] ?? id;
+  return agentTitleFor(id);
 }
 
 export function histAgentColor(id: string): string {
-  return HIST_AGENT_COLOR[id] ?? '#71717a';
+  return agentColorFor(id);
 }
 
 export type HistTimeGroup = 'Today' | 'Yesterday' | 'This Week' | 'This Month' | 'Older';

@@ -35,7 +35,7 @@ interface Props {
 }
 
 // Agents that support native session resume.
-const RESUME_CAPABLE: AgentId[] = ['claude-code', 'codex', 'opencode'];
+const RESUME_CAPABLE: AgentId[] = ['claude-code', 'codex', 'opencode', 'deepseek-tui'];
 
 export function Terminal({ tabId, agentId, cwd, active, agentSessionId, onAgentSessionId, initialPrompt, isCronJob, coworkerId, providerId, modelId }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);

@@ -7,6 +7,7 @@ import type { UsageDateMode } from './types';
 interface _UsageCache {
   data: UsageSummary | null;
   cronStats: CronJobStats[];
+  cronJobAgentMap: Record<string, string>; // jobId → agentId
   dateMode: UsageDateMode;
   customFrom: string;
   customTo: string;
@@ -15,6 +16,7 @@ interface _UsageCache {
 const _cache: _UsageCache = {
   data: null,
   cronStats: [],
+  cronJobAgentMap: {},
   dateMode: '30d',
   customFrom: '',
   customTo: '',
@@ -32,6 +34,7 @@ export function UsageSection({ agents }: UsageSectionProps) {
   const [usageCustomTo, setUsageCustomTo] = useState(() => _cache.customTo);
   const [usageAgentId, setUsageAgentId] = useState(() => _cache.agentId);
   const [cronStats, setCronStats] = useState<CronJobStats[]>(() => _cache.cronStats);
+  const [cronJobAgentMap, setCronJobAgentMap] = useState<Record<string, string>>(() => _cache.cronJobAgentMap);
 
   // Keep module-level cache in sync so next mount sees latest filter + data
   useEffect(() => {
@@ -106,9 +109,18 @@ export function UsageSection({ agents }: UsageSectionProps) {
   }, [usageDateMode, usageCustomFrom, usageCustomTo, usageAgentId]);
 
   useEffect(() => {
-    void window.tday.getCronStats()
-      .then((r) => { const s = Object.values(r); _cache.cronStats = s; setCronStats(s); })
-      .catch(() => undefined);
+    void Promise.all([
+      window.tday.getCronStats(),
+      window.tday.listCronJobs(),
+    ]).then(([statsMap, jobs]) => {
+      const s = Object.values(statsMap);
+      const m: Record<string, string> = {};
+      for (const j of jobs) m[j.id] = j.agentId;
+      _cache.cronStats = s;
+      _cache.cronJobAgentMap = m;
+      setCronStats(s);
+      setCronJobAgentMap(m);
+    }).catch(() => undefined);
   }, []);
 
   return (
@@ -162,7 +174,7 @@ export function UsageSection({ agents }: UsageSectionProps) {
               <div className="flex flex-col gap-1">
                 {[
                   { id: '', label: 'All agents' },
-                  ...agents.map((a) => ({ id: a.id, label: a.displayName })),
+                  ...agents.filter((a) => a.id !== 'terminal').map((a) => ({ id: a.id, label: a.displayName })),
                 ].map(({ id, label }) => (
                   <button
                     key={id}
@@ -232,13 +244,20 @@ export function UsageSection({ agents }: UsageSectionProps) {
                 value={`${fmtNum(usageData.throughputTokensPerMin)} tok/min`}
                 sub={`${usageData.throughputReqPerDay.toFixed(1)} req/d`}
               />
-              {cronStats.length > 0 ? (
-                <StatCard
-                  label="CronJob runs"
-                  value={fmtNum(cronStats.reduce((s, c) => s + c.runCount, 0))}
-                  sub={`${cronStats.length} job${cronStats.length !== 1 ? 's' : ''} · last ${(() => { const last = Math.max(...cronStats.map(c => c.lastRunAt ?? 0)); return last ? new Date(last).toLocaleDateString() : 'never'; })()}`}
-                />
-              ) : null}
+{(() => {
+                const filtered = usageAgentId
+                  ? cronStats.filter((c) => cronJobAgentMap[c.jobId] === usageAgentId)
+                  : cronStats;
+                if (filtered.length === 0) return null;
+                const last = Math.max(...filtered.map((c) => c.lastRunAt ?? 0));
+                return (
+                  <StatCard
+                    label="CronJob runs"
+                    value={fmtNum(filtered.reduce((s, c) => s + c.runCount, 0))}
+                    sub={`${filtered.length} job${filtered.length !== 1 ? 's' : ''} · last ${last ? new Date(last).toLocaleDateString() : 'never'}`}
+                  />
+                );
+              })()}
             </div>
 
             {/* Daily bar chart */}

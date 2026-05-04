@@ -155,12 +155,9 @@ export function TabBar({
               onMouseLeave={scheduleCloseMenu}
             >
               <div className="rounded-md border border-zinc-800 bg-zinc-900 py-1 text-xs shadow-xl">
-                {([
-                  'pi', 'claude-code', 'codex', 'copilot', 'opencode',
-                  'gemini', 'qwen-code', 'crush', 'hermes',
-                ] as AgentId[]).map((id) => {
-                  const info = agentList.find((a) => a.id === id);
-                  const installed = !!info?.detect.available;
+                {agentList.filter((a) => a.id !== 'terminal').map((info) => {
+                  const id = info.id as AgentId;
+                  const installed = !!info.detect.available;
                   const hasProviders = installed && providersList.length > 0;
                   const submenuOpen = hoveredAgentId === id;
                   return (
@@ -179,7 +176,7 @@ export function TabBar({
                             : 'cursor-not-allowed text-zinc-600'
                         }`}
                       >
-                        <span>{agentTitle(id)}</span>
+                        <span>{info.displayName}</span>
                         <span className="ml-3 flex items-center gap-1 text-[10px] text-zinc-500">
                           {id === defaultAgentId ? 'default' : installed ? '' : 'not installed'}
                           {hasProviders ? <span className="text-zinc-600">›</span> : null}

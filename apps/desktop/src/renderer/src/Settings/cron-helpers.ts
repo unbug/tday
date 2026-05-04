@@ -1,33 +1,16 @@
 import type { AgentId } from '@tday/shared';
+import { AGENT_TITLE_MAP, AGENT_COLOR_MAP, SCHEDULABLE_AGENT_IDS } from '../types/tab';
 import { type SchedState, DEFAULT_SCHED } from './types';
 
-export const CRON_AGENT_IDS: AgentId[] = [
-  'pi', 'claude-code', 'codex', 'copilot', 'opencode', 'gemini', 'qwen-code', 'crush', 'hermes',
-];
+export const CRON_AGENT_IDS: AgentId[] = SCHEDULABLE_AGENT_IDS;
 
-export const CRON_AGENT_LABEL: Record<string, string> = {
-  pi: 'Pi',
-  'claude-code': 'Claude',
-  codex: 'Codex',
-  copilot: 'Copilot',
-  opencode: 'OpenCode',
-  gemini: 'Gemini',
-  'qwen-code': 'Qwen',
-  crush: 'Crush',
-  hermes: 'Hermes',
-};
+export const CRON_AGENT_LABEL: Record<string, string> = Object.fromEntries(
+  Object.entries(AGENT_TITLE_MAP).filter(([id]) => id !== 'terminal'),
+);
 
-export const CRON_AGENT_COLOR: Record<string, string> = {
-  pi: '#a78bfa',
-  'claude-code': '#f97316',
-  codex: '#22d3ee',
-  copilot: '#60a5fa',
-  opencode: '#34d399',
-  gemini: '#4ade80',
-  'qwen-code': '#f472b6',
-  crush: '#fb7185',
-  hermes: '#fbbf24',
-};
+export const CRON_AGENT_COLOR: Record<string, string> = Object.fromEntries(
+  Object.entries(AGENT_COLOR_MAP).filter(([id]) => id !== 'terminal'),
+);
 
 export const WEEKDAY_LABEL = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 

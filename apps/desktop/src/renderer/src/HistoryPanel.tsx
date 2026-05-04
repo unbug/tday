@@ -1,5 +1,6 @@
 import type { TabHistoryEntry } from '@tday/shared';
 import type { AgentId } from '@tday/shared';
+import { agentTitle, agentColor } from './types/tab';
 
 interface Props {
   entries: TabHistoryEntry[];
@@ -7,36 +8,6 @@ interface Props {
   onDelete: (histId: string) => void;
   onClose: () => void;
 }
-
-function agentLabel(id: AgentId): string {
-  switch (id) {
-    case 'pi': return 'Pi';
-    case 'claude-code': return 'Claude';
-    case 'codex': return 'Codex';
-    case 'copilot': return 'Copilot';
-    case 'opencode': return 'OpenCode';
-    case 'gemini': return 'Gemini';
-    case 'qwen-code': return 'Qwen';
-    case 'crush': return 'Crush';
-    case 'hermes': return 'Hermes';
-    case 'deepseek-tui': return 'DeepSeek';
-    case 'terminal': return 'Terminal';
-  }
-}
-
-const AGENT_COLORS: Record<AgentId, string> = {
-  pi: 'bg-fuchsia-500',
-  'claude-code': 'bg-orange-500',
-  codex: 'bg-blue-500',
-  copilot: 'bg-sky-500',
-  opencode: 'bg-emerald-500',
-  gemini: 'bg-purple-500',
-  'qwen-code': 'bg-red-500',
-  crush: 'bg-pink-500',
-  hermes: 'bg-amber-500',
-  'deepseek-tui': 'bg-cyan-500',
-  terminal: 'bg-zinc-500',
-};
 
 function formatRelative(ts: number): string {
   const diff = Date.now() - ts;
@@ -115,9 +86,10 @@ export function HistoryPanel({ entries, onRestore, onDelete, onClose }: Props) {
                   >
                     {/* Agent badge */}
                     <span
-                      className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-white ${AGENT_COLORS[entry.agentId] ?? 'bg-zinc-600'}`}
+                      className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-white"
+                      style={{ background: agentColor(entry.agentId) }}
                     >
-                      {agentLabel(entry.agentId)[0]}
+                      {agentTitle(entry.agentId)[0]}
                     </span>
 
                     <div className="min-w-0 flex-1">
@@ -127,7 +99,7 @@ export function HistoryPanel({ entries, onRestore, onDelete, onClose }: Props) {
                           {entry.title}
                         </span>
                         <span className="shrink-0 text-[10px] text-zinc-500">
-                          {agentLabel(entry.agentId)}
+                          {agentTitle(entry.agentId)}
                         </span>
                       </div>
                       {/* Cwd row */}

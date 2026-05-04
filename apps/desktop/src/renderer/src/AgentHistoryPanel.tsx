@@ -15,39 +15,16 @@
 
 import { useState, useMemo, useRef, useEffect } from 'react';
 import type { AgentHistoryEntry } from '@tday/shared';
+import { agentTitleFor, agentColorFor } from './types/tab';
 
 // ── Agent metadata ────────────────────────────────────────────────────────────
 
-const AGENT_LABEL: Record<string, string> = {
-  pi: 'Pi',
-  'claude-code': 'Claude',
-  codex: 'Codex',
-  copilot: 'Copilot',
-  opencode: 'OpenCode',
-  gemini: 'Gemini',
-  'qwen-code': 'Qwen',
-  crush: 'Crush',
-  hermes: 'Hermes',
-};
-
-const AGENT_COLOR: Record<string, string> = {
-  pi: '#a78bfa',
-  'claude-code': '#f97316',
-  codex: '#22d3ee',
-  copilot: '#60a5fa',
-  opencode: '#34d399',
-  gemini: '#4ade80',
-  'qwen-code': '#f472b6',
-  crush: '#fb7185',
-  hermes: '#fbbf24',
-};
-
 function agentLabel(id: string): string {
-  return AGENT_LABEL[id] ?? id;
+  return agentTitleFor(id);
 }
 
 function agentColor(id: string): string {
-  return AGENT_COLOR[id] ?? '#71717a';
+  return agentColorFor(id);
 }
 
 // ── Time grouping ─────────────────────────────────────────────────────────────
