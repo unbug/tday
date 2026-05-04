@@ -1,5 +1,6 @@
 import { startTransition, useRef, useState } from 'react';
 import type { AgentId, AgentInfo, ProviderProfile } from '@tday/shared';
+import { presetForKind } from '@tday/shared';
 import { type Tab, agentTitle, agentColor } from '../types/tab';
 
 interface TabBarProps {
@@ -194,6 +195,7 @@ export function TabBar({
                           <div className="scroll-themed max-h-72 overflow-y-auto rounded-md border border-zinc-800 bg-zinc-900 py-1 text-xs shadow-xl">
                             {providersList.map((p) => {
                               const models = [
+                                ...(presetForKind(p.kind)?.models ?? []),
                                 ...(p.discoveredModels ?? []),
                                 ...(p.extraModels ?? []),
                               ].filter(Boolean);
