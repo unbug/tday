@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
 import { electronApp } from '@electron-toolkit/utils';
 import { spawn as spawnPty } from 'node-pty';
 import { spawn as spawnChild } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -292,44 +292,108 @@ function registerIpc(): void {
 
       env = piLike.env;
 
-      // claude-code reads its ~/.claude/settings.json *after* the process env, so
-      // any `env.*` keys in that file (e.g. ANTHROPIC_BASE_URL pointing at DeepSeek)
-      // silently override whatever tday injects via process.env. The only reliable
-      // way to win is to pass --settings with a JSON snippet that is applied *after*
-      // the user's settings.json. We inject the provider URL / key / model there so
-      // claude-code always uses the provider Tday chose.
+      // ── claude-code provider override ─────────────────────────────────────
+      // claude-code re-injects env vars from ~/.claude/settings.json AFTER the
+      // process env is set, so any ANTHROPIC_BASE_URL in settings.json (e.g.
+      // pointing to a user's global DeepSeek config) silently overrides what
+      // tday sets via process.env or --settings.
+      //
+      // Strategy (following cc-switch): directly patch ~/.claude/settings.json
+      // before spawning. This is the only approach that reliably wins. The
+      // gateway resolution URL (our local proxy for local providers, or the
+      // provider's real URL for cloud providers) becomes the source of truth.
       if (req.agentId === 'claude-code' && effectiveProvider) {
         const cp = effectiveProvider;
+        // gatewayResolution is set when ClaudeCodeLocalAdapter is active (local providers).
         const resolvedUrl = gatewayResolution?.baseUrl ?? cp.baseUrl;
+        const apiKey = cp.apiKey ?? 'no-key-required';
 
-        // Build the override object that will be passed via --settings.
-        const settingsOverride: Record<string, unknown> = {
-          // Clear model aliases that may be set to a different provider's models.
-          env: {} as Record<string, string>,
+        // Build the env section to inject. Model override keys are blanked so
+        // claude-code won't route to a stale model name from user's settings.
+        const envPatch: Record<string, string> = {
+          ANTHROPIC_MODEL: '',
+          ANTHROPIC_DEFAULT_OPUS_MODEL: '',
+          ANTHROPIC_DEFAULT_SONNET_MODEL: '',
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: '',
+          CLAUDE_CODE_SUBAGENT_MODEL: '',
+          ANTHROPIC_SMALL_FAST_MODEL: '',
         };
-        const envOverride = settingsOverride.env as Record<string, string>;
-
         if (resolvedUrl) {
-          envOverride.ANTHROPIC_BASE_URL    = resolvedUrl;
-          envOverride.ANTHROPIC_API_URL     = resolvedUrl;
-          // Prevent the alias env vars from routing to a different model/endpoint.
-          envOverride.ANTHROPIC_MODEL                  = '';
-          envOverride.ANTHROPIC_DEFAULT_OPUS_MODEL     = '';
-          envOverride.ANTHROPIC_DEFAULT_SONNET_MODEL   = '';
-          envOverride.ANTHROPIC_DEFAULT_HAIKU_MODEL    = '';
-          envOverride.CLAUDE_CODE_SUBAGENT_MODEL       = '';
+          envPatch.ANTHROPIC_BASE_URL = resolvedUrl;
+          envPatch.ANTHROPIC_API_URL  = resolvedUrl;
         }
-        if (cp.apiKey) {
-          envOverride.ANTHROPIC_API_KEY = cp.apiKey;
+        if (apiKey) {
+          envPatch.ANTHROPIC_API_KEY   = apiKey;
+          envPatch.ANTHROPIC_AUTH_TOKEN = apiKey;
         }
 
-        // --settings accepts a JSON string; tday appends it to args before the prompt.
-        args = ['--settings', JSON.stringify(settingsOverride), ...args];
+        // 1. Write ~/.claude/settings.json (permanent, survives --settings priority issues)
+        try {
+          const claudeDir = join(homedir(), '.claude');
+          const claudeSettingsPath = join(claudeDir, 'settings.json');
+          mkdirSync(claudeDir, { recursive: true });
+          let existing: Record<string, unknown> = {};
+          try {
+            existing = JSON.parse(readFileSync(claudeSettingsPath, 'utf8')) as Record<string, unknown>;
+          } catch { /* file may not exist yet */ }
+          existing.env = { ...(existing.env as Record<string, string> | undefined ?? {}), ...envPatch };
+          // Clear model field at root level too (user may have set it)
+          delete existing.model;
+          writeFileSync(claudeSettingsPath, JSON.stringify(existing, null, 2), 'utf8');
+        } catch (e) {
+          console.warn('[tday] could not patch ~/.claude/settings.json:', e);
+        }
+
+        // 2. Also set the env vars in our process env for the child process
+        Object.assign(env, envPatch);
       }
 
       if (req.agentId === 'deepseek-tui' && effectiveProvider) {
         Object.assign(env, deepseekTuiProviderEnv(effectiveProvider.kind, effectiveProvider.apiKey, effectiveProvider.baseUrl));
       }
+
+      // ── opencode provider override ─────────────────────────────────────────
+      // opencode (local providers) needs the provider registered in its config.
+      // Rather than mutating ~/.config/opencode/opencode.json, we use the
+      // OPENCODE_CONFIG_CONTENT env var which opencode merges as a mid-priority
+      // override (after global config, before project config). This tells
+      // opencode about the custom provider + its baseURL + available models.
+      if (req.agentId === 'opencode' && effectiveProvider) {
+        const cp = effectiveProvider;
+        const OC_LOCAL = new Set(['ollama', 'lmstudio', 'litellm', 'vllm', 'sglang']);
+        if (cp.kind && OC_LOCAL.has(cp.kind) && cp.baseUrl) {
+          // Collect all known model IDs, stripping any server-side prefix.
+          const modelSet = new Set<string>();
+          const strip = (m: string) => m.includes('/') ? m.replace(/^[^/]+\//, '') : m;
+          if (cp.model) modelSet.add(strip(cp.model));
+          for (const m of cp.discoveredModels ?? []) modelSet.add(strip(m));
+          for (const m of cp.extraModels ?? []) modelSet.add(strip(m));
+          if (modelSet.size === 0) modelSet.add('default');
+
+          const modelsMap: Record<string, { name: string }> = {};
+          for (const m of modelSet) modelsMap[m] = { name: m };
+
+          const DISPLAY: Record<string, string> = {
+            lmstudio: 'LM Studio (local)',
+            ollama: 'Ollama (local)',
+            litellm: 'LiteLLM (proxy)',
+            vllm: 'vLLM (local)',
+            sglang: 'SGLang (local)',
+          };
+          const providerDef: Record<string, unknown> = {
+            npm: '@ai-sdk/openai-compatible',
+            name: DISPLAY[cp.kind] ?? cp.kind,
+            options: {
+              baseURL: cp.baseUrl,
+              ...(cp.apiKey ? { apiKey: cp.apiKey } : { apiKey: 'no-key-required' }),
+            },
+            models: modelsMap,
+          };
+          const configContent = { provider: { [cp.kind]: providerDef } };
+          env.OPENCODE_CONFIG_CONTENT = JSON.stringify(configContent);
+        }
+      }
+
       if (gatewayResolution?.noProxyHosts?.length) appendNoProxy(env, gatewayResolution.noProxyHosts);
       launchCwd = normalizeLaunchCwd(piLike.cwd);
     }

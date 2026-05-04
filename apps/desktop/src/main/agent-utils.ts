@@ -326,17 +326,18 @@ export function modelFlagsFor(
     case 'opencode': {
       const LOCAL_OAI_COMPAT = new Set(['ollama', 'lmstudio', 'litellm', 'vllm', 'sglang']);
       // Local servers (LM Studio, Ollama, …) store model IDs with an embedded
-      // server-side prefix, e.g. "qwen/qwen3.6-35b-a3b". Passing that raw value
-      // makes OpenCode interpret "qwen" as Alibaba DashScope and display the
-      // wrong provider/model name. Strip the embedded prefix first, then
-      // prepend the correct opencode provider id (e.g. "lmstudio").
+      // server-side prefix, e.g. "lmstudio/qwen3.6-35b-a3b". Strip it so we
+      // end up with just the bare model id before we prepend the correct
+      // opencode provider id (e.g. "lmstudio/qwen3.6-35b-a3b").
       const bareModel =
         providerKind && LOCAL_OAI_COMPAT.has(providerKind) && model.includes('/')
           ? model.replace(/^[^/]+\//, '')
           : model;
-      const composed = bareModel.includes('/')
-        ? bareModel
-        : `${opencodeProviderId(providerKind)}/${bareModel}`;
+      // Always compose as "<opencode-provider-id>/<model-id>".
+      // Without this, models that already contain "/" (e.g. OpenRouter's
+      // "anthropic/claude-sonnet-4-5") would be passed without the provider
+      // prefix, causing opencode to look up the wrong provider.
+      const composed = `${opencodeProviderId(providerKind)}/${bareModel}`;
       return ['--model', composed];
     }
     case 'gemini':
