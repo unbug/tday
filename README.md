@@ -242,7 +242,8 @@ A **Tab** owns one **Session** = one PTY process bound to one agent adapter, one
 | ~~**v0.5.x**~~ ✅ | Cron & Automation | **Settings → Cron** tab: job list with enable/clone/delete, ScheduleWidget (Interval / At time / Custom cron with datetime picker), human-readable schedule preview. Cron scheduler in main process (node-cron, persistent JSON store, per-job stats). `initialPrompt` delivered reliably at spawn time: CLI positional arg for codex / claude-code / opencode / gemini / qwen-code; bracketed-paste PTY write (XTerm `ESC[200~`) for pi / copilot / hermes / crush — works even when screen is locked. OpenCode `run` subcommand fix. Job dashboard with next-run countdown, run count, last-status. |
 | ~~**v0.6.0**~~ ✅ | Token usage analytics | Dashboard UI: summary cards, daily bar chart, by-model and by-agent breakdown (SQLite store, 30+ model pricing). |
 | ~~**v0.6.x**~~ ✅ | CoWorker system | **Settings → CoWorkers** tab: create/edit/delete role personas injected as system prompts. Three source types: built-in (`builtin:*` from AGENT.md), online (`online:*` URL-cached from GitHub), custom (inline text / local file / URL). Three curated presets (Karpathy Code Guidelines, Devin-style Planner, Earnings Call Analyst). CoWorker dropdown in CwdBar — select per tab, prompt injected immediately into the running PTY. CoWorker binding in Cron jobs. Settings dialog tabs now top-tab style; backdrop `no-drag` fix so tabs are always clickable even when TabBar wraps to multiple rows. |
-| **v0.7.0** 🔄 🔄 | MCP Management | MCP server registry in Settings (add/edit/remove, stdio & SSE transports). Auto-discover running local MCP processes. Per-agent MCP binding. Bundled quick-add servers: filesystem, memory, fetch, git. |
+| ~~**v0.7.x**~~ ✅ | CoWorker Registry + Data Freshness | CoWorker registry expanded to **35 built-in presets across 7 categories** (Mental Models, Startup & Business, Coding & Engineering, Writing & Content, Research & Analysis, Security & Privacy, Productivity). GitHub ★ stars on cards and detail view (24 h TTL cache). Unique ID derivation per entry (`deriveRegistrySlug`). Online refresh button with spinner + error state. **App-level state lifting**: agents / coworkers / providers owned by App root, passed as props to Settings — eliminates IPC stutter on every Settings open. `requestIdleCallback` background refresh after Settings closes (5 s timeout fallback). New-tab provider submenu now includes all preset models alongside discovered & user-added models. |
+| **v0.7.0** 🔄 | MCP Management | MCP server registry in Settings (add/edit/remove, stdio & SSE transports). Auto-discover running local MCP processes. Per-agent MCP binding. Bundled quick-add servers: filesystem, memory, fetch, git. |
 | **v0.7.1** | Channels Management | Named I/O channels in Settings: pipe agent stdout to files, webhooks, or other agents. Fan-out (broadcast one agent's output to multiple sinks). Fan-in (merge streams from multiple agents into one tab). Channel editor with live preview. |
 | **v0.7.2** | Custom Agents | `AgentAdapter` public package. Register third-party agents via manifest URL or local path. Agents tab shows community adapters with one-click install. Custom system-prompt per agent. |
 | **v0.8.0** | Browser & Computer Use | `browser-use` agent adapter (Python). Playwright MCP server quick-add. Anthropic computer-use mode toggle (bash / screenshot / text-editor tools). Screenshot side-panel in tab. |
@@ -252,7 +253,6 @@ A **Tab** owns one **Session** = one PTY process bound to one agent adapter, one
 | **v0.12.0** | Performance & polish | xterm WebGL renderer. Lazy-render inactive tabs. Session snapshot/restore. Memory budget warnings. Profiling page (CPU/RSS/handles). |
 | **v0.13.0** | Plugins & extensibility | Adapter SDK (`AgentAdapter` public package). Third-party adapters via manifest URL. Custom themes. Plugin marketplace. |
 | **v0.14.0** | Sync & teams | Optional E2EE sync of memory + usage across devices. Team dashboards. Shared provider pools. |
-| **v1.0.0** | GA | Auto-update (Squirrel), signed & notarised builds for macOS/Windows/Linux, full docs site, telemetry opt-in. |
 | **v1.0.0** | GA | Auto-update (Squirrel), signed & notarised builds for macOS/Windows/Linux, full docs site, telemetry opt-in. |
 
 ---
@@ -391,6 +391,26 @@ The acceptance criterion: **`npm run dev` opens a window with one tab running th
 - [x] Settings tab bar: top-tab style (`rounded-t`) replacing pill-style tabs
 - [x] Settings dialog backdrop: `no-drag` fix — tabs always clickable even when TabBar wraps to multiple rows
 - [x] Settings dialog: lazy `dialogSize` init capped to viewport + `overflow-y-auto` so tabs are never pushed above visible area
+
+### ~~v0.7.x — CoWorker Registry + Data Freshness~~ ✅
+- [x] **CoWorker registry** expanded to 35 built-in presets across 7 categories:
+  - [x] 🧠 Mental Models (5 presets)
+  - [x] 🚀 Startup & Business (5 presets)
+  - [x] 💻 Coding & Engineering (6 presets)
+  - [x] ✍️ Writing & Content (5 presets)
+  - [x] 🔍 Research & Analysis (5 presets)
+  - [x] 🔒 Security & Privacy (4 presets)
+  - [x] ⚡ Productivity (5 presets)
+- [x] **GitHub ★ stars** displayed on CoWorker cards and detail view (24 h TTL cache, `refreshGitHubStars`)
+- [x] **Unique ID derivation** (`deriveRegistrySlug`) — path-based discriminator prevents ID collisions for repos with generic filenames (system.md, index.md)
+- [x] **Online registry refresh** button with spinner and error display; `loadRegistryPresets()` prefers the source with more entries (bundled vs cache)
+- [x] **CronSection Refresh button** moved to sidebar footer — same row as "Add cron job" (icon-only)
+- [x] **App-level state lifting** — agents / coworkers / providers owned by App root, passed as props to Settings
+  - [x] Eliminates slow `listAgents()` IPC call on every Settings open (subprocess spawns for tool detection)
+  - [x] `useEffect([open])` in Settings now only fetches fast/time-sensitive data (cron + `getAllSettings`)
+  - [x] Prop → local state sync effects for `agentsProp` / `cfgProp` to receive background updates
+- [x] **`requestIdleCallback` background refresh** after Settings closes — silently re-fetches agents + coworkers + providers during browser idle time (5 s forced timeout fallback)
+- [x] **New-tab provider submenu** now includes all preset models (`presetForKind(p.kind)?.models`) alongside `discoveredModels` and `extraModels`
 
 ### v0.7.0 — MCP Management
 MCP (Model Context Protocol) lets agents use tools, access resources, and receive prompts from external servers. Tday becomes the central registry for all MCP connections — configure once, available everywhere.
