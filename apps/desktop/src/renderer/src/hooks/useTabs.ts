@@ -19,7 +19,7 @@ export interface TabsHook {
   agentHistoryLoading: boolean;
   dragId: string | null;
   closeTab: (id: string) => void;
-  addTab: (agentId?: AgentId, home?: string) => void;
+  addTab: (agentId?: AgentId, providerId?: string, modelId?: string) => void;
   restoreTab: () => void;
   restoreTabFromHistory: (entry: TabHistoryEntry) => void;
   restoreFromAgentHistory: (entry: AgentHistoryEntry) => void;
@@ -142,8 +142,8 @@ export function useTabs(home: string, defaultAgentId: AgentId): TabsHook {
     void saveHistory();
   };
 
-  const addTab = (agentId: AgentId = defaultAgentId, _home?: string) => {
-    const t = newTab(lastCwd() || _home || home, agentId);
+  const addTab = (agentId: AgentId = defaultAgentId, providerId?: string, modelId?: string) => {
+    const t: Tab = { ...newTab(lastCwd() || home, agentId), providerId, modelId };
     setTabs((prev) => [...prev, t]);
     setActiveId(t.id);
   };

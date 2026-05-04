@@ -104,6 +104,7 @@ export const INSTALL_SPECS: Record<AgentId, AgentInstallSpec | undefined> = {
     description: 'Hermes coding agent — install manually and ensure `hermes` is on PATH',
     bin: 'hermes',
   },
+  terminal: undefined,
 };
 
 // ── Detection ─────────────────────────────────────────────────────────────────

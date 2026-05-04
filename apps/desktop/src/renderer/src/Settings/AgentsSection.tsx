@@ -115,7 +115,7 @@ export function AgentsSection({
       {/* Left: agent list */}
       <div className="flex w-56 shrink-0 flex-col overflow-hidden border-r border-zinc-800/60">
         <div className="scroll-themed flex-1 overflow-y-auto p-2">
-          {agents.map((a) => {
+          {agents.filter((a) => a.id !== 'terminal').map((a) => {
             const effectiveId = activeAgentId || agents[0]?.id;
             return (
               <button

@@ -11,7 +11,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import type { UsageRecord, UsageSummary, ModelUsage, AgentUsage, DailyStat } from './types.js';
+import type { UsageRecord, UsageSummary, ModelUsage, AgentUsage, ProjectUsage, DailyStat } from './types.js';
 import { resolvePrice, calcCost, BUILTIN_PRICING } from './pricing.js';
 import type { ModelPricing } from './types.js';
 
@@ -75,6 +75,7 @@ export function computeUsageSummary(records: UsageRecord[]): UsageSummary {
   let totalCostUsd: number | null = 0;
   const byModel: Record<string, ModelUsage> = {};
   const byAgent: Record<string, AgentUsage> = {};
+  const byProject: Record<string, ProjectUsage> = {};
   const dailyMap: Record<string, DailyStat> = {};
 
   for (const r of records) {
@@ -117,6 +118,20 @@ export function computeUsageSummary(records: UsageRecord[]): UsageSummary {
     if (cost !== null && am.costUsd !== null) am.costUsd += cost;
     else am.costUsd = null;
 
+    // Per-project
+    if (r.cwd) {
+      const proj = r.cwd.replace(/[\\/]$/, '').split(/[\\/]/).pop() ?? r.cwd;
+      if (!byProject[proj]) {
+        byProject[proj] = { project: proj, inputTokens: 0, outputTokens: 0, requests: 0, costUsd: 0 };
+      }
+      const pm = byProject[proj]!;
+      pm.inputTokens += r.inputTokens;
+      pm.outputTokens += r.outputTokens;
+      pm.requests += 1;
+      if (cost !== null && pm.costUsd !== null) pm.costUsd += cost;
+      else pm.costUsd = null;
+    }
+
     // Daily
     if (!dailyMap[date]) dailyMap[date] = { date, inputTokens: 0, outputTokens: 0, cachedTokens: 0, requests: 0, costUsd: 0, toolCalls: 0 };
     const dm = dailyMap[date]!;
@@ -152,6 +167,7 @@ export function computeUsageSummary(records: UsageRecord[]): UsageSummary {
     throughputTokensPerMin,
     byModel,
     byAgent,
+    byProject,
     daily,
   };
 }

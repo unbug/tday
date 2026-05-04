@@ -21,6 +21,10 @@ export interface Tab {
   isCronJob?: boolean;
   /** CoWorker id to apply — its system prompt is prepended to the agent's initial prompt. */
   coworkerId?: string;
+  /** Provider profile id override for this tab — overrides the agent's default binding. */
+  providerId?: string;
+  /** Per-tab model override — overrides the provider profile's default model. */
+  modelId?: string;
 }
 
 /** Persisted tab record. Epoch is intentionally dropped — every restored
@@ -71,6 +75,7 @@ export function agentTitle(id: AgentId): string {
     case 'qwen-code':   return 'Qwen';
     case 'crush':       return 'Crush';
     case 'hermes':      return 'Hermes';
+    case 'terminal':    return 'Terminal';
   }
 }
 
@@ -85,6 +90,7 @@ export function agentColor(id: AgentId): string {
     case 'qwen-code':   return '#f472b6'; // pink
     case 'crush':       return '#fb7185'; // rose
     case 'hermes':      return '#fbbf24'; // amber
+    case 'terminal':    return '#6b7280'; // gray
   }
 }
 

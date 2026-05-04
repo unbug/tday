@@ -28,6 +28,7 @@ export function ProvidersSection({ cfg, onCfgChange, onSaved }: ProvidersSection
   const [savedTick, setSavedTick] = useState(0);
   const [probeState, setProbeState] = useState<Record<string, ProbeResult>>({});
   const probeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [newModelInput, setNewModelInput] = useState('');
 
   const profile = useMemo(
     () => cfg?.profiles.find((p) => p.id === activeId) ?? null,
@@ -320,6 +321,16 @@ export function ProvidersSection({ cfg, onCfgChange, onSaved }: ProvidersSection
                   ...baseModels,
                   ...profilePreset.models.filter((m) => !baseModels.includes(m)),
                 ];
+                const extraModels = profile.extraModels ?? [];
+                const addExtraModel = (m: string) => {
+                  const val = m.trim();
+                  if (!val || extraModels.includes(val)) return;
+                  updateProfile({ extraModels: [...extraModels, val] });
+                  setNewModelInput('');
+                };
+                const removeExtraModel = (m: string) => {
+                  updateProfile({ extraModels: extraModels.filter((x) => x !== m) });
+                };
                 return (
                   <>
                     <input
@@ -330,7 +341,7 @@ export function ProvidersSection({ cfg, onCfgChange, onSaved }: ProvidersSection
                       onChange={(e) => updateProfile({ model: e.target.value })}
                     />
                     <datalist id={`models-${profile.id}`}>
-                      {allModels.map((m) => (
+                      {[...allModels, ...extraModels].map((m) => (
                         <option key={m} value={m} />
                       ))}
                     </datalist>
@@ -351,6 +362,58 @@ export function ProvidersSection({ cfg, onCfgChange, onSaved }: ProvidersSection
                         ))}
                       </div>
                     ) : null}
+                    {/* Extra (user-added) models */}
+                    <div className="mt-2 border-t border-zinc-800/50 pt-2">
+                      <div className="mb-1 text-[10px] uppercase tracking-wider text-zinc-600">
+                        Extra models
+                      </div>
+                      {extraModels.length > 0 ? (
+                        <div className="mb-1.5 flex flex-wrap gap-1">
+                          {extraModels.map((m) => (
+                            <span
+                              key={m}
+                              className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] ${
+                                profile.model === m
+                                  ? 'bg-fuchsia-500/25 text-fuchsia-200'
+                                  : 'bg-zinc-800 text-zinc-300'
+                              }`}
+                            >
+                              <button
+                                className="hover:text-white"
+                                onClick={() => updateProfile({ model: m })}
+                              >
+                                {m}
+                              </button>
+                              <button
+                                onClick={() => removeExtraModel(m)}
+                                className="ml-0.5 text-zinc-500 hover:text-rose-400"
+                                title="Remove"
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      <div className="flex gap-1.5">
+                        <input
+                          className="input flex-1 text-[11px]"
+                          placeholder="model-id e.g. deepseek-r1"
+                          value={newModelInput}
+                          onChange={(e) => setNewModelInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') { e.preventDefault(); addExtraModel(newModelInput); }
+                          }}
+                        />
+                        <button
+                          onClick={() => addExtraModel(newModelInput)}
+                          disabled={!newModelInput.trim()}
+                          className="shrink-0 rounded-md border border-zinc-700 px-2.5 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+                        >
+                          Add
+                        </button>
+                      </div>
+                    </div>
                   </>
                 );
               })()}

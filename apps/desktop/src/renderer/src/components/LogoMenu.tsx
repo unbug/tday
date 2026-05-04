@@ -89,7 +89,7 @@ export function LogoMenu({
           onMouseEnter={openLogoMenu}
           onMouseLeave={closeLogoMenu}
         >
-          <div className="min-w-[200px] rounded-md border border-zinc-800 bg-zinc-950 py-1 shadow-2xl text-xs">
+          <div className="min-w-[200px] rounded-md border border-zinc-800 bg-zinc-900/70 py-1 shadow-2xl text-xs backdrop-blur-md">
             {/* History with submenu */}
             <div
               className="relative"
@@ -122,7 +122,7 @@ export function LogoMenu({
                     historySubmenuTimer.current = setTimeout(() => setShowHistorySubmenu(false), 350);
                   }}
                 >
-                  <div className="w-96 rounded-md border border-zinc-800 bg-zinc-950 py-1 shadow-2xl text-xs">
+                  <div className="w-96 rounded-md border border-zinc-800 bg-zinc-900 py-1 shadow-2xl text-xs">
                     {agentHistoryLoading ? (
                       <div className="px-3 py-3 text-center text-zinc-600">Loading…</div>
                     ) : agentHistory.length === 0 ? (

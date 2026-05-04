@@ -19,6 +19,7 @@ function agentLabel(id: AgentId): string {
     case 'qwen-code': return 'Qwen';
     case 'crush': return 'Crush';
     case 'hermes': return 'Hermes';
+    case 'terminal': return 'Terminal';
   }
 }
 
@@ -32,6 +33,7 @@ const AGENT_COLORS: Record<AgentId, string> = {
   'qwen-code': 'bg-red-500',
   crush: 'bg-pink-500',
   hermes: 'bg-amber-500',
+  terminal: 'bg-zinc-500',
 };
 
 function formatRelative(ts: number): string {

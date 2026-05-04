@@ -142,7 +142,7 @@ export function HistorySection({ entries, loading, onRestore, onHide }: HistoryS
           <div className="scroll-themed flex-1 overflow-y-auto">
             {grouped.map(([groupLabel, groupEntries]) => (
               <div key={groupLabel}>
-                <div className="sticky top-0 z-10 bg-zinc-950/90 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                <div className="sticky top-0 z-10 bg-zinc-950 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
                   {groupLabel}
                 </div>
                 {groupEntries.map((entry) => (

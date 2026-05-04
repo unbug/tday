@@ -64,6 +64,8 @@ export class CodexDeepSeekAnthropicAdapter implements GatewayAdapter {
   private readonly proxies = new Map<string, { server: Server; baseUrl: string }>();
   private readonly conversations = new Map<string, AMessage[]>();
   private readonly thinkingStates = new Map<string, ThinkingState>();
+  /** Maps agentId → last-known cwd for usage attribution. */
+  private readonly cwdByAgentId = new Map<string, string>();
 
   matches(ctx: GatewayAdapterContext): boolean {
     return ctx.agentId === 'codex' && ctx.provider.kind === 'deepseek';
@@ -75,6 +77,8 @@ export class CodexDeepSeekAnthropicAdapter implements GatewayAdapter {
       baseUrl: ctx.provider.baseUrl,
       apiKey: ctx.provider.apiKey,
     });
+    // Always update the cwd for this agentId (latest spawn wins).
+    if (ctx.cwd) this.cwdByAgentId.set(ctx.agentId, ctx.cwd);
     const existing = this.proxies.get(key);
     if (existing) {
       return { baseUrl: existing.baseUrl, noProxyHosts: ['127.0.0.1', 'localhost', '::1'] };
@@ -83,7 +87,7 @@ export class CodexDeepSeekAnthropicAdapter implements GatewayAdapter {
     const server = createServer((req, res) => {
       const url = new URL(req.url ?? '/', 'http://127.0.0.1');
       if (req.method === 'POST' && url.pathname.replace(/\/$/, '') === '/responses') {
-        void this.handleResponses(req, res, ctx.provider, ctx.agentId).catch((err: unknown) => {
+        void this.handleResponses(req, res, ctx.provider, ctx.agentId, this.cwdByAgentId).catch((err: unknown) => {
           console.error('[tday] gateway error:', err);
           if (!res.headersSent) {
             sendJson(res, 500, { error: { message: String(err), type: 'gateway_error' } });
@@ -117,6 +121,7 @@ export class CodexDeepSeekAnthropicAdapter implements GatewayAdapter {
     this.proxies.clear();
     this.conversations.clear();
     this.thinkingStates.clear();
+    this.cwdByAgentId.clear();
   }
 
   // ─── Private helpers ──────────────────────────────────────────────────────
@@ -146,6 +151,7 @@ export class CodexDeepSeekAnthropicAdapter implements GatewayAdapter {
     res: ServerResponse,
     provider: ProviderProfile,
     agentId: string,
+    cwdMap: Map<string, string>,
   ): Promise<void> {
     const body = await readRequestJson(req);
     const responseId = `resp_tday_${Date.now().toString(36)}`;
@@ -213,6 +219,7 @@ export class CodexDeepSeekAnthropicAdapter implements GatewayAdapter {
         inputTokens: json.usage?.input_tokens ?? 0,
         outputTokens: json.usage?.output_tokens ?? 0,
         cachedTokens: json.usage?.cache_read_input_tokens ?? 0,
+        cwd: cwdMap.get(agentId),
       });
       sendJson(res, 200, {
         ...baseResponse(responseId, body.model, 'completed', output),
@@ -316,6 +323,7 @@ export class CodexDeepSeekAnthropicAdapter implements GatewayAdapter {
       inputTokens: streamInputTokens,
       outputTokens: streamOutputTokens,
       cachedTokens: streamCachedTokens,
+      cwd: cwdMap.get(agentId),
     });
     res.write('data: [DONE]\n\n');
     res.end();

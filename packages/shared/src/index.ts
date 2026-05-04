@@ -12,7 +12,8 @@ export type AgentId =
   | 'gemini'
   | 'qwen-code'
   | 'crush'
-  | 'hermes';
+  | 'hermes'
+  | 'terminal';
 
 /**
  * Provider "kind" controls how credentials are projected onto an agent.
@@ -76,6 +77,8 @@ export interface ProviderProfile {
   env?: Record<string, string>;
   /** Model IDs discovered by the last successful Scan, persisted across sessions. */
   discoveredModels?: string[];
+  /** User-added model IDs that persist alongside discovered models (not overwritten by Scan). */
+  extraModels?: string[];
 }
 
 /** What the renderer asks the main process to spawn. */
@@ -83,6 +86,8 @@ export interface SpawnRequest {
   tabId: string;
   agentId: AgentId;
   providerId?: string;
+  /** Per-tab model override — overrides the provider profile's default model. */
+  modelId?: string;
   cwd?: string;
   cols: number;
   rows: number;
@@ -256,6 +261,8 @@ export interface CoWorker {
   hasUserOverride?: boolean;
   /** Category label for grouping preset online coworkers (e.g. '思维框架', 'AI 与技术'). */
   category?: string;
+  /** GitHub repository stargazer count for the source repo (online presets only). */
+  githubStars?: number;
   createdAt?: number;
 }
 
@@ -353,6 +360,7 @@ export const IPC = {
   coworkerReset: 'coworker:reset',         // reset user override back to preset
   coworkerFetchUrl: 'coworker:fetch-url',   // preview: fetch raw content from a URL
   coworkerRefreshCache: 'coworker:refresh-cache', // refresh cached content for online/url coworker
+  coworkerRefreshRegistry: 'coworker:refresh-registry', // force re-fetch CoWorkers.md registry
 } as const;
 
 // ─── Discovery types ──────────────────────────────────────────────────────────
@@ -418,6 +426,14 @@ export interface AgentUsage {
   costUsd: number | null;
 }
 
+export interface ProjectUsage {
+  project: string;
+  inputTokens: number;
+  outputTokens: number;
+  requests: number;
+  costUsd: number | null;
+}
+
 export interface DailyStat {
   date: string;
   inputTokens: number;
@@ -444,6 +460,8 @@ export interface UsageSummary {
   throughputTokensPerMin: number;
   byModel: Record<string, ModelUsage>;
   byAgent: Record<string, AgentUsage>;
+  /** Breakdown by project (cwd basename). Only populated when records include cwd. */
+  byProject: Record<string, ProjectUsage>;
   daily: DailyStat[];
 }
 

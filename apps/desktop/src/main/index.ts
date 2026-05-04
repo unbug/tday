@@ -27,6 +27,7 @@ import { probeBaseUrl } from './discovery/probe.js';
 import { appendUsage, loadUsageRecords, computeUsageSummary } from './usage/store.js';
 import { SESSION_FILE_AGENTS } from './usage/session-readers/index.js';
 import { loadCachedSessionRecords, triggerSessionCacheRefresh } from './usage/session-cache.js';
+import { loadStore as loadHistoryStore } from './agent-history/store.js';
 import {
   loadHistory,
   pushHistoryEntry,
@@ -44,7 +45,7 @@ import {
 } from './agent-history/index.js';
 import { getAllSettings, setSetting, type JsonValue } from './settings-store.js';
 import { loadCronJobs, saveCronJobs, loadCronStats, CronScheduler } from './cron.js';
-import { listAllCoworkers, upsertCoworker, deleteCoworker, resetBuiltinCoworker, buildEffectivePrompt, normalizeGitHubUrl, refreshCoworkerUrlCache, scheduleBackgroundRefresh, resolveCoworker, refreshCoworkersRegistry, parseCoworkersRegistry } from './coworker.js';
+import { listAllCoworkers, upsertCoworker, deleteCoworker, resetBuiltinCoworker, buildEffectivePrompt, normalizeGitHubUrl, refreshCoworkerUrlCache, scheduleBackgroundRefresh, resolveCoworker, refreshCoworkersRegistry, reloadRegistryFromBundled, parseCoworkersRegistry } from './coworker.js';
 
 // Modular utilities
 import { PiAdapter } from '@tday/adapter-pi';
@@ -178,7 +179,9 @@ function registerIpc(): void {
     const providerId = req.providerId ?? agentConf.providerId ?? providers.default;
     const provider = providers.profiles.find((p) => p.id === providerId) ?? providers.profiles[0];
     const effectiveProvider =
-      provider && agentConf.model ? { ...provider, model: agentConf.model } : provider;
+      provider && (req.modelId ?? agentConf.model)
+        ? { ...provider, model: req.modelId ?? agentConf.model }
+        : provider;
 
     // Apply CoWorker system prompt if one is selected for this tab
     if (req.coworkerId) {
@@ -188,6 +191,32 @@ function registerIpc(): void {
     const cwd = normalizeLaunchCwd(req.cwd);
     const baseEnv = { ...process.env };
     await ensureFd(baseEnv);
+
+    // Plain terminal: skip agent spawn, use login shell directly
+    if (req.agentId === 'terminal') {
+      const shell = process.env.SHELL ?? (process.platform === 'win32' ? 'cmd.exe' : '/bin/bash');
+      baseEnv.COLUMNS = String(req.cols);
+      baseEnv.LINES = String(req.rows);
+      const pty = spawnPty(shell, [], {
+        name: 'xterm-256color',
+        cols: req.cols,
+        rows: req.rows,
+        cwd,
+        env: baseEnv as Record<string, string>,
+      });
+      ptys.set(req.tabId, pty);
+      pty.onData((data) => {
+        if (shuttingDown || event.sender.isDestroyed()) return;
+        event.sender.send(IPC.ptyData, { tabId: req.tabId, data });
+      });
+      pty.onExit(({ exitCode, signal }) => {
+        if (!shuttingDown && !event.sender.isDestroyed()) {
+          event.sender.send(IPC.ptyExit, { tabId: req.tabId, exitCode, signal: signal ?? null });
+        }
+        ptys.delete(req.tabId);
+      });
+      return { tabId: req.tabId };
+    }
 
     const spec = INSTALL_SPECS[req.agentId];
     const bin = agentConf.bin ?? spec?.bin ?? req.agentId;
@@ -225,7 +254,7 @@ function registerIpc(): void {
       const userArgs = (agentConf.args ?? []).slice();
       const gatewayResolution =
         effectiveProvider
-          ? await localGatewayManager.resolve({ agentId: req.agentId, provider: effectiveProvider })
+          ? await localGatewayManager.resolve({ agentId: req.agentId, provider: effectiveProvider, cwd: req.cwd })
           : null;
       const modelArgs = modelFlagsFor(
         req.agentId,
@@ -349,8 +378,21 @@ function registerIpc(): void {
   ipcMain.handle(IPC.usageAppend, (_e, record: UsageRecord) => { appendUsage(record); });
   ipcMain.handle(IPC.usageQuery, (_e, filter: UsageFilter = {}) => {
     triggerSessionCacheRefresh();
-    const sessionRecords = loadCachedSessionRecords(filter);
-    const jsonlRecords = loadUsageRecords(filter).filter((r) => !SESSION_FILE_AGENTS.has(r.agentId));
+    let sessionRecords = loadCachedSessionRecords(filter);
+    let jsonlRecords = loadUsageRecords(filter).filter((r) => !SESSION_FILE_AGENTS.has(r.agentId));
+    // Enrich records without cwd by joining with history-index entries
+    const historyEntries = loadHistoryStore().entries;
+    if (historyEntries.length > 0) {
+      const enrich = <T extends { agentId: string; ts: number; cwd?: string }>(r: T): T => {
+        if (r.cwd) return r;
+        const match = historyEntries.find(
+          (e) => e.agentId === r.agentId && e.startedAt <= r.ts && e.updatedAt >= r.ts,
+        );
+        return match ? { ...r, cwd: match.cwd } : r;
+      };
+      jsonlRecords = jsonlRecords.map(enrich);
+      sessionRecords = sessionRecords.map(enrich);
+    }
     return computeUsageSummary([...jsonlRecords, ...sessionRecords]);
   });
 
@@ -409,7 +451,13 @@ function registerIpc(): void {
   ipcMain.handle(IPC.coworkerDelete, (_e, id: string) => deleteCoworker(id));
   ipcMain.handle(IPC.coworkerReset, (_e, id: string) => resetBuiltinCoworker(id));
   ipcMain.handle(IPC.coworkerFetchUrl, async (_e, rawUrl: string): Promise<string> => {
-    const url = normalizeGitHubUrl(rawUrl.trim());
+    const trimmed = rawUrl.trim();
+    // Local file path: read directly
+    if (trimmed.startsWith('/') || /^[A-Za-z]:[/\\]/.test(trimmed)) {
+      const { readFileSync } = await import('fs');
+      return readFileSync(trimmed, 'utf8');
+    }
+    const url = normalizeGitHubUrl(trimmed);
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`);
     return res.text();
@@ -418,6 +466,15 @@ function registerIpc(): void {
     const cw = resolveCoworker(id);
     if (!cw?.url) throw new Error(`CoWorker "${id}" has no URL configured`);
     await refreshCoworkerUrlCache(id, cw.url);
+  });
+  ipcMain.handle(IPC.coworkerRefreshRegistry, async (): Promise<import('@tday/shared').CoWorker[]> => {
+    try {
+      await refreshCoworkersRegistry();
+    } catch {
+      // GitHub unavailable — fall back to bundled CoWorkers.md
+      reloadRegistryFromBundled();
+    }
+    return listAllCoworkers();
   });
 }
 

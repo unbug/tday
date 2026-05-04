@@ -433,9 +433,10 @@ function getBundledRegistryPath(): string {
 }
 
 /**
- * Parse the pipe-separated CoWorkers.md registry format.
- * Lines starting with '#' are skipped. Each data line must have 5 fields:
- *   category|emoji|name|description|url
+ * Parse the CoWorkers.md registry format.
+ * Supports both plain pipe-separated lines and Markdown table rows.
+ * Header rows (starting with '#', containing 'category', or separator rows like |---|) are skipped.
+ * Each data line must have 5 fields: category|emoji|name|description|url
  * Returns an array of CoWorker presets (id derived from the url slug).
  */
 export function parseCoworkersRegistry(text: string): CoWorker[] {
@@ -443,9 +444,15 @@ export function parseCoworkersRegistry(text: string): CoWorker[] {
   for (const raw of text.split('\n')) {
     const line = raw.trim();
     if (!line || line.startsWith('#')) continue;
-    const parts = line.split('|');
+    // Skip Markdown table separator rows (e.g. |---|---|)
+    if (/^\|[-| ]+\|$/.test(line)) continue;
+    // Strip leading/trailing pipe for Markdown table rows
+    const stripped = line.startsWith('|') && line.endsWith('|') ? line.slice(1, -1) : line;
+    const parts = stripped.split('|');
     if (parts.length < 5) continue;
     const [category, emoji, name, description, url] = parts.map((p) => p.trim());
+    // Skip header row
+    if (name === 'name' || url === 'url') continue;
     if (!name || !url) continue;
     // Derive a stable id from the GitHub repo name (owner/REPO), or fall back to last path segment.
     // This ensures file-path URLs like /blob/main/SKILL.md produce the same id as bare repo URLs.
@@ -482,17 +489,105 @@ function loadRegistryPresets(): CoWorker[] {
     try {
       const text = readFileSync(cachePath, 'utf8');
       const parsed = parseCoworkersRegistry(text);
-      if (parsed.length > 0) return parsed;
+      if (parsed.length > 0) return applyStarsCache(parsed);
     } catch { /* fall through */ }
   }
   // Fall back to bundled copy
   try {
     const text = readFileSync(getBundledRegistryPath(), 'utf8');
     const parsed = parseCoworkersRegistry(text);
-    if (parsed.length > 0) return parsed;
+    if (parsed.length > 0) return applyStarsCache(parsed);
   } catch { /* fall through */ }
   // Final fallback: hardcoded list
-  return PRESET_ONLINE_COWORKERS;
+  return applyStarsCache(PRESET_ONLINE_COWORKERS);
+}
+
+// ── GitHub stars cache ────────────────────────────────────────────────────────
+
+const STARS_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+
+interface StarsCacheEntry { stars: number; fetchedAt: number }
+type StarsCache = Record<string, StarsCacheEntry>;
+
+function getStarsCachePath(): string {
+  return join(homedir(), '.tday', 'coworkers', 'stars.json');
+}
+
+function loadStarsCache(): StarsCache {
+  try {
+    const text = readFileSync(getStarsCachePath(), 'utf8');
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === 'object') return parsed as StarsCache;
+  } catch { /* fall through */ }
+  return {};
+}
+
+function writeStarsCache(cache: StarsCache): void {
+  try {
+    const p = getStarsCachePath();
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, JSON.stringify(cache, null, 2), 'utf8');
+  } catch { /* ignore */ }
+}
+
+/** Extract `owner/repo` from a github.com URL. Returns undefined for non-GitHub URLs. */
+function extractRepoSlug(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  const m = url.match(/^https?:\/\/(?:github\.com|raw\.githubusercontent\.com)\/([^/]+)\/([^/?#]+)/);
+  if (!m) return undefined;
+  return `${m[1]}/${m[2]}`;
+}
+
+/** Mutate-and-return a list with githubStars filled in from the on-disk cache. */
+function applyStarsCache(list: CoWorker[]): CoWorker[] {
+  const cache = loadStarsCache();
+  return list.map((c) => {
+    const slug = extractRepoSlug(c.url);
+    if (!slug) return c;
+    const entry = cache[slug];
+    if (!entry) return c;
+    return { ...c, githubStars: entry.stars };
+  });
+}
+
+/**
+ * Refresh GitHub star counts for all unique repos in the current registry.
+ * Stale entries (>TTL) are re-fetched in parallel from the public GitHub API.
+ * Updates `_registryPresets` in place so cards reflect fresh numbers.
+ */
+async function refreshGitHubStars(): Promise<void> {
+  const cache = loadStarsCache();
+  const slugs = new Set<string>();
+  for (const c of _registryPresets) {
+    const slug = extractRepoSlug(c.url);
+    if (slug) slugs.add(slug);
+  }
+  const now = Date.now();
+  const stale = [...slugs].filter((slug) => {
+    const e = cache[slug];
+    return !e || now - e.fetchedAt > STARS_CACHE_TTL_MS;
+  });
+  if (stale.length === 0) {
+    // Still apply current cache to in-memory list
+    _registryPresets = applyStarsCache(_registryPresets);
+    _registryMap = new Map(_registryPresets.map((c) => [c.id, c]));
+    return;
+  }
+  const headers: Record<string, string> = { 'User-Agent': 'tday-app' };
+  if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  await Promise.all(stale.map(async (slug) => {
+    try {
+      const res = await fetch(`https://api.github.com/repos/${slug}`, { headers });
+      if (!res.ok) return;
+      const json = await res.json() as { stargazers_count?: number };
+      if (typeof json.stargazers_count === 'number') {
+        cache[slug] = { stars: json.stargazers_count, fetchedAt: now };
+      }
+    } catch { /* skip on failure */ }
+  }));
+  writeStarsCache(cache);
+  _registryPresets = applyStarsCache(_registryPresets);
+  _registryMap = new Map(_registryPresets.map((c) => [c.id, c]));
 }
 
 /**
@@ -509,9 +604,26 @@ export async function refreshCoworkersRegistry(): Promise<void> {
   const cachePath = getRegistryCachePath();
   mkdirSync(dirname(cachePath), { recursive: true });
   writeFileSync(cachePath, text, 'utf8');
-  // Hot-reload in-memory presets
-  _registryPresets = parsed;
-  _registryMap = new Map(parsed.map((c) => [c.id, c]));
+  // Hot-reload in-memory presets (with stars from cache)
+  _registryPresets = applyStarsCache(parsed);
+  _registryMap = new Map(_registryPresets.map((c) => [c.id, c]));
+  // Also refresh stars in the background (non-blocking for the registry refresh).
+  await refreshGitHubStars();
+}
+
+/**
+ * Force-reload the in-memory registry from the bundled CoWorkers.md file,
+ * bypassing the runtime cache. Used as fallback when GitHub is unavailable.
+ */
+export function reloadRegistryFromBundled(): void {
+  try {
+    const text = readFileSync(getBundledRegistryPath(), 'utf8');
+    const parsed = parseCoworkersRegistry(text);
+    if (parsed.length > 0) {
+      _registryPresets = applyStarsCache(parsed);
+      _registryMap = new Map(_registryPresets.map((c) => [c.id, c]));
+    }
+  } catch { /* ignore */ }
 }
 
 // In-memory registry state (mutable, updated by refreshCoworkersRegistry)

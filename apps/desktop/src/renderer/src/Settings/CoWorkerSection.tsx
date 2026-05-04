@@ -29,6 +29,7 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
   const [deleting, setDeleting] = useState<string | null>(null);
   const [resetting, setResetting] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState<string | null>(null);
+  const [refreshingRegistry, setRefreshingRegistry] = useState(false);
   const [previewFetching, setPreviewFetching] = useState(false);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -80,14 +81,10 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
     setPreviewError(null);
   };
 
-  const openNew = (kind: 'online' | 'custom') => {
-    setDraftKind(kind);
-    if (kind === 'online') {
-      setDraft({ emoji: '🌐', name: '', description: '', systemPrompt: '', url: '' });
-    } else {
-      setDraft({ emoji: '🤖', name: '', description: '', systemPrompt: '' });
-      setCustomSource('text');
-    }
+  const openNew = () => {
+    setDraftKind('custom');
+    setDraft({ emoji: '🤖', name: '', description: '', systemPrompt: '', url: '', promptFile: '' });
+    setCustomSource('text');
     setSelected(null);
     setOnlineBrowsing(false);
     setEditing(true);
@@ -117,8 +114,8 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
     setDraft({});
     setPreviewContent(null);
     setPreviewError(null);
-    // Return to online browse if we came from there
-    if (draftKind === 'online') setOnlineBrowsing(true);
+    // Return to online browse for new items or when editing online CoWorkers
+    if (!selected || draftKind === 'online') setOnlineBrowsing(true);
   };
 
   const fetchPreview = useCallback(async (url: string) => {
@@ -163,7 +160,27 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
     setSaving(true);
     try {
       let coworker: CoWorker;
-      if (draftKind === 'online') {
+      if (!draft.id && draftKind !== 'builtin') {
+        // ── New form: use customSource to determine kind ──
+        const base = {
+          name: draft.name.trim(),
+          emoji: draft.emoji?.trim() || (customSource === 'url' ? '🌐' : '🤖'),
+          description: draft.description?.trim() ?? '',
+          createdAt: Date.now(),
+        };
+        if (customSource === 'url') {
+          const url = draft.url?.trim();
+          coworker = { ...base, id: `online:${Date.now()}`, systemPrompt: '', url };
+          await window.tday.saveCoworker(coworker);
+          if (url) { try { await window.tday.refreshCoworkerCache(coworker.id); } catch { /* cache later */ } }
+        } else if (customSource === 'file') {
+          coworker = { ...base, id: `custom:${Date.now()}`, systemPrompt: '', promptFile: draft.promptFile?.trim() || undefined };
+          await window.tday.saveCoworker(coworker);
+        } else {
+          coworker = { ...base, id: `custom:${Date.now()}`, systemPrompt: draft.systemPrompt?.trim() ?? '' };
+          await window.tday.saveCoworker(coworker);
+        }
+      } else if (draftKind === 'online') {
         if (!draft.url?.trim()) return;
         coworker = {
           id: draft.id?.startsWith('online:') ? draft.id : `online:${Date.now()}`,
@@ -263,10 +280,25 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
     [onCoworkersChange],
   );
 
+  const handleRefreshRegistry = useCallback(async () => {
+    setRefreshingRegistry(true);
+    try {
+      const fresh = await window.tday.refreshCoworkerRegistry();
+      onCoworkersChange(fresh);
+    } finally {
+      setRefreshingRegistry(false);
+    }
+  }, [onCoworkersChange]);
+
   const isSaveDisabled =
     saving ||
     !draft.name?.trim() ||
-    (draftKind === 'online'
+    (!draft.id && draftKind !== 'builtin'
+      // New form: validate based on active tab
+      ? customSource === 'url' ? !draft.url?.trim()
+        : customSource === 'file' ? !draft.promptFile?.trim()
+        : !draft.systemPrompt?.trim()
+      : draftKind === 'online'
       ? !draft.url?.trim()
       : draftKind === 'builtin'
       ? !draft.systemPrompt?.trim()
@@ -334,7 +366,19 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
                 }`}
               >
                 <span className="text-[10px]">
-                  {cat === 'All' ? '🌐' : cat === 'Thinking Frameworks' ? '🧠' : cat === 'Investment & Business' ? '💰' : cat === 'AI & Engineering' ? '🤖' : cat === 'Investment Analysis' ? '📈' : '📁'}
+                  {cat === 'All' ? '🌐'
+                    : cat === 'Mental Models' ? '🧠'
+                    : cat === 'Startup & Business' ? '🚀'
+                    : cat === 'Coding & Engineering' ? '💻'
+                    : cat === 'Writing & Content' ? '✍️'
+                    : cat === 'Research & Analysis' ? '🔬'
+                    : cat === 'Security & Privacy' ? '🛡️'
+                    : cat === 'Productivity' ? '⚡'
+                    : cat === 'Thinking Frameworks' ? '🧠'
+                    : cat === 'Investment & Business' ? '💰'
+                    : cat === 'AI & Engineering' ? '🤖'
+                    : cat === 'Investment Analysis' ? '📈'
+                    : '📁'}
                 </span>
                 <span className="truncate text-[11px]">{cat}</span>
                 <span className="ml-auto shrink-0 text-[10px] text-zinc-600">
@@ -351,12 +395,6 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
               {userOnlineList.map((cw) => <SidebarItem key={cw.id} cw={cw} />)}
             </>
           )}
-          <button
-            onClick={() => openNew('online')}
-            className="mt-0.5 w-full rounded-md px-2 py-1 text-left text-[10px] text-sky-400 hover:bg-zinc-900"
-          >
-            + Add Online
-          </button>
 
           {/* Custom */}
           <SectionLabel label="Custom" />
@@ -364,11 +402,13 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
             <p className="px-2 py-1 text-[10px] text-zinc-700">No custom CoWorkers</p>
           )}
           {customList.map((cw) => <SidebarItem key={cw.id} cw={cw} />)}
+        </div>
+        <div className="shrink-0 border-t border-zinc-800/40 p-2">
           <button
-            onClick={() => openNew('custom')}
-            className="mt-0.5 w-full rounded-md px-2 py-1 text-left text-[10px] text-fuchsia-300 hover:bg-zinc-900"
+            onClick={() => openNew()}
+            className="w-full rounded-md px-2 py-1.5 text-left text-[10px] font-medium text-fuchsia-300 hover:bg-zinc-900"
           >
-            + Add Custom
+            + Add CoWorker
           </button>
         </div>
       </div>
@@ -386,6 +426,21 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
                   ({filteredOnlineCards.length})
                 </span>
               </span>
+              <button
+                onClick={() => void handleRefreshRegistry()}
+                disabled={refreshingRegistry}
+                title="Re-fetch CoWorkers.md registry"
+                className="flex items-center gap-1 rounded px-2 py-1 text-[10px] text-zinc-400 hover:bg-zinc-800 disabled:opacity-40 transition-colors"
+              >
+                <svg
+                  width="11" height="11" viewBox="0 0 11 11" fill="none"
+                  className={refreshingRegistry ? 'animate-spin' : ''}
+                >
+                  <path d="M9.5 5.5A4 4 0 1 1 5.5 1.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                  <path d="M5.5 1.5L7.5 3.5M5.5 1.5L7.5-.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                {refreshingRegistry ? 'Refreshing…' : 'Refresh'}
+              </button>
               <a
                 href="https://github.com/unbug/tday/blob/main/CoWorkers.md"
                 target="_blank"
@@ -429,6 +484,12 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
                           <span className="shrink-0 rounded bg-sky-900/50 px-1 py-px text-[9px] text-sky-400">added</span>
                         )}
                       </div>
+                      {typeof cw.githubStars === 'number' && (
+                        <p className="mt-1 flex items-center gap-0.5 text-[9px] text-zinc-500">
+                          <span>★</span>
+                          <span>{cw.githubStars >= 1000 ? `${(cw.githubStars / 1000).toFixed(1)}k` : cw.githubStars}</span>
+                        </p>
+                      )}
                       {cw.description && (
                         <p className="mt-2 line-clamp-2 text-[10px] leading-relaxed text-zinc-500">
                           {cw.description}
@@ -481,6 +542,12 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
                   )}
                   {selected.hasUserOverride && (
                     <span className="rounded bg-amber-900/60 px-1.5 py-px text-[9px] font-medium text-amber-400">modified</span>
+                  )}
+                  {typeof selected.githubStars === 'number' && (
+                    <span className="flex items-center gap-0.5 rounded bg-zinc-800 px-1.5 py-px text-[9px] font-medium text-zinc-400">
+                      <span>★</span>
+                      <span>{selected.githubStars >= 1000 ? `${(selected.githubStars / 1000).toFixed(1)}k` : selected.githubStars}</span>
+                    </span>
                   )}
                 </div>
                 {selected.description && (
@@ -558,12 +625,22 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
               ) : selected.url ? (
                 /* Custom URL source */
                 <>
-                  <p
-                    className="mb-3 truncate rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 font-mono text-[10px] text-zinc-400"
-                    title={selected.url}
-                  >
-                    🔗 {selected.url}
-                  </p>
+                  <div className="mb-3 flex items-center gap-2">
+                    <p
+                      className="min-w-0 flex-1 truncate rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 font-mono text-[10px] text-zinc-400"
+                      title={selected.url}
+                    >
+                      🔗 {selected.url}
+                    </p>
+                    <a
+                      href={selected.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="shrink-0 rounded px-2 py-1 text-[10px] text-sky-400 hover:bg-sky-500/10 transition-colors"
+                    >
+                      Open ↗
+                    </a>
+                  </div>
                   {selected.cachedContent ? (
                     <MiniMarkdown text={selected.cachedContent} className="text-[11px] leading-relaxed text-zinc-300" />
                   ) : (
@@ -573,13 +650,29 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
               ) : selected.promptFile ? (
                 /* Custom file source */
                 <>
-                  <p
-                    className="mb-3 truncate rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 font-mono text-[10px] text-zinc-400"
-                    title={selected.promptFile}
-                  >
-                    📄 {selected.promptFile}
-                  </p>
-                  <p className="text-[10px] italic text-zinc-600">(content loaded from file at runtime)</p>
+                  <div className="mb-3 flex items-center gap-2">
+                    <p
+                      className="min-w-0 flex-1 truncate rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 font-mono text-[10px] text-zinc-400"
+                      title={selected.promptFile}
+                    >
+                      📄 {selected.promptFile}
+                    </p>
+                    <button
+                      onClick={() => void fetchPreview(selected.promptFile!)}
+                      disabled={previewFetching}
+                      className="shrink-0 rounded px-2 py-1 text-[10px] text-fuchsia-400 hover:bg-fuchsia-500/10 transition-colors disabled:opacity-40"
+                    >
+                      {previewFetching ? '…' : 'Preview'}
+                    </button>
+                  </div>
+                  {previewError && (
+                    <p className="mb-2 text-[10px] text-red-400">{previewError}</p>
+                  )}
+                  {previewContent ? (
+                    <MiniMarkdown text={previewContent} className="text-[11px] leading-relaxed text-zinc-300" />
+                  ) : !previewFetching && (
+                    <p className="text-[10px] italic text-zinc-600">Click Preview to load file content.</p>
+                  )}
                 </>
               ) : (
                 /* Inline text (builtin or custom-text) */
@@ -596,9 +689,7 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
               <span className="text-[11px] font-semibold text-zinc-300">
                 {draft.id
                   ? `Edit: ${draft.name || '…'}`
-                  : draftKind === 'online'
-                  ? 'New Online CoWorker'
-                  : 'New Custom CoWorker'}
+                  : 'New CoWorker'}
               </span>
               <div className="flex gap-1.5">
                 <button
@@ -623,13 +714,6 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
                 <div className="rounded-md border border-amber-800/50 bg-amber-950/30 px-3 py-2 text-[10px] text-amber-400">
                   Changes will be saved to <span className="font-mono">~/.tday/coworkers/</span> as a local override.
                   You can reset to the preset version at any time.
-                </div>
-              )}
-              {/* Online info banner */}
-              {draftKind === 'online' && (
-                <div className="rounded-md border border-sky-800/50 bg-sky-950/30 px-3 py-2 text-[10px] text-sky-400">
-                  Only GitHub URLs are supported. Content is auto-cached and refreshed in the background.
-                  You cannot edit the content directly.
                 </div>
               )}
 
@@ -665,9 +749,123 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
                 />
               </div>
 
-              {/* ── Online: URL field + optional preview ── */}
-              {draftKind === 'online' && (
+              {/* ── NEW CoWorker: radio-style source selector ── */}
+              {!draft.id && draftKind !== 'builtin' && (
                 <>
+                  {/* Radio options */}
+                  <div className="space-y-2">
+                    {([
+                      { src: 'url'  as CustomSource, label: '🔗 URL',         desc: 'Fetch from a GitHub / raw URL' },
+                      { src: 'file' as CustomSource, label: '📄 File',        desc: 'Pick a local .md / .txt file' },
+                      { src: 'text' as CustomSource, label: '✏️ Text prompt', desc: 'Write a system prompt inline' },
+                    ]).map(({ src, label, desc }) => (
+                      <label
+                        key={src}
+                        className={`flex cursor-pointer items-start gap-2.5 rounded-md border px-3 py-2 transition-colors ${
+                          customSource === src
+                            ? 'border-zinc-600 bg-zinc-800/60'
+                            : 'border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800/30'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="coworker-source"
+                          className="mt-0.5 accent-fuchsia-500"
+                          checked={customSource === src}
+                          onChange={() => { setCustomSource(src); setPreviewContent(null); setPreviewError(null); }}
+                        />
+                        <div>
+                          <div className="text-[11px] text-zinc-200">{label}</div>
+                          <div className="text-[10px] text-zinc-500">{desc}</div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+
+                  {/* Active input */}
+                  {customSource === 'url' && (
+                    <div className="flex gap-1.5">
+                      <input
+                        className="input min-w-0 flex-1 font-mono text-[10px]"
+                        placeholder="https://github.com/user/repo/blob/main/SKILL.md"
+                        value={draft.url ?? ''}
+                        onChange={(e) => {
+                          setDraft((p) => ({ ...p, url: e.target.value || undefined }));
+                          setPreviewContent(null);
+                        }}
+                      />
+                      <button
+                        onClick={() => void fetchPreview(draft.url ?? '')}
+                        disabled={previewFetching || !draft.url?.trim()}
+                        className="shrink-0 rounded border border-zinc-700 px-2.5 py-1 text-[10px] text-zinc-400 hover:bg-zinc-800 transition-colors disabled:opacity-40"
+                      >
+                        {previewFetching ? '…' : 'Preview'}
+                      </button>
+                    </div>
+                  )}
+
+                  {customSource === 'file' && (
+                    <div className="space-y-1.5">
+                      <div className="flex gap-1.5">
+                        <input
+                          className="input min-w-0 flex-1 font-mono text-[10px]"
+                          placeholder="/path/to/PROMPT.md"
+                          value={draft.promptFile ?? ''}
+                          onChange={(e) => {
+                            setDraft((p) => ({ ...p, promptFile: e.target.value || undefined }));
+                            setPreviewContent(null);
+                          }}
+                        />
+                        <button
+                          onClick={async () => {
+                            const path = await window.tday.pickFile({
+                              filters: [{ name: 'Markdown', extensions: ['md', 'txt'] }],
+                            });
+                            if (path) {
+                              setDraft((p) => ({ ...p, promptFile: path }));
+                              setPreviewContent(null);
+                            }
+                          }}
+                          className="shrink-0 rounded border border-zinc-700 px-2.5 py-1 text-[10px] text-zinc-400 hover:bg-zinc-800 transition-colors"
+                        >
+                          Browse
+                        </button>
+                        <button
+                          onClick={() => void fetchPreview(draft.promptFile ?? '')}
+                          disabled={previewFetching || !draft.promptFile?.trim()}
+                          className="shrink-0 rounded border border-zinc-700 px-2.5 py-1 text-[10px] text-zinc-400 hover:bg-zinc-800 transition-colors disabled:opacity-40"
+                        >
+                          {previewFetching ? '…' : 'Preview'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {customSource === 'text' && (
+                    <textarea
+                      className="input min-h-[180px] w-full resize-y font-mono text-[11px]"
+                      placeholder={`# Role: My Specialist\n\nYou are a ...\n\n## Workflow\n1. ...`}
+                      value={draft.systemPrompt ?? ''}
+                      onChange={(e) => setDraft((p) => ({ ...p, systemPrompt: e.target.value }))}
+                    />
+                  )}
+
+                  {/* Shared preview — no max-height, show full content */}
+                  {previewError && <p className="text-[10px] text-red-400">{previewError}</p>}
+                  {previewContent && (
+                    <div className="rounded-md border border-zinc-700 bg-zinc-900 p-3">
+                      <MiniMarkdown text={previewContent} className="text-[11px] leading-relaxed text-zinc-300" />
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* ── EDIT Online: URL field ── */}
+              {draft.id && draftKind === 'online' && (
+                <>
+                  <div className="rounded-md border border-sky-800/50 bg-sky-950/30 px-3 py-2 text-[10px] text-sky-400">
+                    Content is auto-cached from the URL. You cannot edit it directly.
+                  </div>
                   <div>
                     <label className="mb-1 block text-[10px] text-zinc-500">GitHub URL *</label>
                     <input
@@ -679,9 +877,6 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
                         setPreviewContent(null);
                       }}
                     />
-                    <p className="mt-1 text-[9px] text-zinc-600">
-                      Supports /blob/ URLs and raw URLs. Content is cached locally and auto-refreshed.
-                    </p>
                   </div>
                   {draft.url?.trim() && (
                     <div>
@@ -706,8 +901,8 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
                 </>
               )}
 
-              {/* ── Custom: source selector ── */}
-              {draftKind === 'custom' && (
+              {/* ── EDIT Custom: source selector ── */}
+              {draft.id && draftKind === 'custom' && (
                 <>
                   <div>
                     <label className="mb-1.5 block text-[10px] text-zinc-500">Content Source</label>
@@ -725,8 +920,6 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
                       ))}
                     </div>
                   </div>
-
-                  {/* Text */}
                   {customSource === 'text' && (
                     <div>
                       <label className="mb-1 block text-[10px] text-zinc-500">
@@ -740,8 +933,6 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
                       />
                     </div>
                   )}
-
-                  {/* File */}
                   {customSource === 'file' && (
                     <div>
                       <label className="mb-1 block text-[10px] text-zinc-500">Local File *</label>
@@ -764,15 +955,8 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
                           Browse
                         </button>
                       </div>
-                      {draft.promptFile && (
-                        <p className="mt-1 text-[10px] italic text-zinc-600">
-                          File content is read fresh on every agent execution.
-                        </p>
-                      )}
                     </div>
                   )}
-
-                  {/* URL */}
                   {customSource === 'url' && (
                     <div>
                       <label className="mb-1 block text-[10px] text-zinc-500">URL *</label>

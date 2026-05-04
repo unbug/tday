@@ -23,6 +23,8 @@ export interface UsageRecord {
   cachedTokens: number;
   /** Number of tool/function calls in this response (0 if not reported). */
   toolCalls?: number;
+  /** Working directory of the session that generated this request. */
+  cwd?: string;
 }
 
 /**
@@ -47,12 +49,22 @@ export interface UsageSummary {
   byModel: Record<string, ModelUsage>;
   /** Breakdown by agent. */
   byAgent: Record<string, AgentUsage>;
+  /** Breakdown by project (cwd basename). Only populated when records include cwd. */
+  byProject: Record<string, ProjectUsage>;
   /** Daily bucketed data for the chart (ISO date string → counts). */
   daily: DailyStat[];
 }
 
 export interface ModelUsage {
   model: string;
+  inputTokens: number;
+  outputTokens: number;
+  requests: number;
+  costUsd: number | null;
+}
+
+export interface ProjectUsage {
+  project: string;
   inputTokens: number;
   outputTokens: number;
   requests: number;

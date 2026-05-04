@@ -140,6 +140,8 @@ const api = {
     ipcRenderer.invoke(IPC.coworkerFetchUrl, url) as Promise<string>,
   refreshCoworkerCache: (id: string) =>
     ipcRenderer.invoke(IPC.coworkerRefreshCache, id) as Promise<void>,
+  refreshCoworkerRegistry: () =>
+    ipcRenderer.invoke(IPC.coworkerRefreshRegistry) as Promise<CoWorker[]>,
 };
 
 contextBridge.exposeInMainWorld('tday', api);

@@ -17,6 +17,8 @@ export interface GatewayResolution {
 export interface GatewayAdapterContext {
   agentId: AgentId;
   provider: ProviderProfile;
+  /** Working directory of the tab that triggered the spawn. Used for usage attribution. */
+  cwd?: string;
 }
 
 /** An internal adapter that handles a specific (agentId, provider.kind) pair. */

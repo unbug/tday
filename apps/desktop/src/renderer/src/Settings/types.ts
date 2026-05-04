@@ -1,5 +1,5 @@
 export type Section = 'providers' | 'agents' | 'usage' | 'history' | 'cron' | 'coworkers';
-export type UsageDateMode = 'today' | '7d' | '30d' | '90d' | 'custom';
+export type UsageDateMode = 'today' | 'this-week' | 'this-month' | '7d' | '30d' | '90d' | 'custom';
 
 export type SchedMode = 'interval' | 'at' | 'cron';
 export type IntervalUnit = 'min' | 'hour' | 'day';

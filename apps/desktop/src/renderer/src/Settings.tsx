@@ -14,6 +14,7 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onSaved?: () => void;
+  onProvidersCfgChange?: (cfg: ProvidersConfig) => void;
   initialSection?: Section;
   onSectionChange?: (section: Section) => void;
   agentHistory?: AgentHistoryEntry[];
@@ -36,6 +37,7 @@ export function Settings({
   open,
   onClose,
   onSaved,
+  onProvidersCfgChange,
   initialSection,
   agentHistory = [],
   agentHistoryLoading = false,
@@ -230,7 +232,11 @@ export function Settings({
 
         <div className="flex min-h-0 flex-1 overflow-hidden">
           {section === 'providers' && (
-            <ProvidersSection cfg={cfg} onCfgChange={setCfg} onSaved={onSaved ?? (() => {})} />
+            <ProvidersSection
+              cfg={cfg}
+              onCfgChange={(newCfg) => { setCfg(newCfg); onProvidersCfgChange?.(newCfg); }}
+              onSaved={onSaved ?? (() => {})}
+            />
           )}
           {section === 'agents' && (
             <AgentsSection
@@ -244,7 +250,10 @@ export function Settings({
               onNavigateToCron={handleNavigateToCron}
             />
           )}
-          {section === 'usage' && <UsageSection agents={agents} />}
+          {/* Usage: always mounted so state/cache persists across section switches */}
+          <div style={{ display: section === 'usage' ? 'flex' : 'none', minHeight: 0, flex: 1, overflow: 'hidden' }}>
+            <UsageSection agents={agents} />
+          </div>
           {section === 'history' && (
             <HistorySection
               entries={agentHistory}

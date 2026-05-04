@@ -1,5 +1,5 @@
 import { startTransition, useEffect, useState } from 'react';
-import type { AgentId, AgentInfo, CoWorker } from '@tday/shared';
+import type { AgentId, AgentInfo, CoWorker, ProviderProfile } from '@tday/shared';
 import { Terminal } from './Terminal';
 import { Settings } from './Settings';
 import { TabBar } from './components/TabBar';
@@ -26,6 +26,7 @@ type SettingsSection = 'providers' | 'agents' | 'usage' | 'history' | 'cron' | '
 export default function App() {
   const [home, setHome] = useState<string>('~');
   const [agentList, setAgentList] = useState<AgentInfo[]>([]);
+  const [providersList, setProvidersList] = useState<ProviderProfile[]>([]);
   const [coworkers, setCoworkers] = useState<CoWorker[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('usage');
@@ -57,13 +58,15 @@ export default function App() {
   // ── Startup: load home, agents, settings in parallel ───────────────────────
   useEffect(() => {
     void (async () => {
-      const [h, list, settings] = await Promise.all([
+      const [h, list, settings, provCfg] = await Promise.all([
         window.tday.homeDir(),
         window.tday.listAgents() as Promise<AgentInfo[]>,
         window.tday.getAllSettings(),
+        window.tday.listProviders() as Promise<{ profiles: ProviderProfile[] }>,
       ]);
       setHome(h);
       setAgentList(list);
+      setProvidersList(provCfg.profiles ?? []);
       void window.tday.listCoworkers().then(setCoworkers);
 
       const initialCwd =
@@ -115,7 +118,7 @@ export default function App() {
       {/* Title / tab bar + logo menu */}
       {/* Logo/settings always top-right; border spans the full width of the container */}
       <div className="flex border-b border-zinc-800/60">
-        <div className="flex-1">
+        <div className="min-w-0 flex-1">
           <TabBar
             tabs={tabs}
             activeId={activeId}
@@ -125,12 +128,13 @@ export default function App() {
             defaultAgentId={defaultAgentId}
             onSetActiveId={setActiveId}
             onCloseTab={closeTab}
-            onAddTab={(agentId) => addTab(agentId)}
+            onAddTab={(agentId, providerId, modelId) => addTab(agentId, providerId, modelId)}
             onDragStart={onDragStart}
             onDragOver={onDragOver}
             onDrop={onDrop}
             onDragEnd={onDragEnd}
             onOpenSettings={openSettings}
+            providersList={providersList}
           />
         </div>
         <div className="self-start shrink-0 bg-[#0a0a0f] py-1.5 pr-4">
@@ -168,7 +172,7 @@ export default function App() {
           onSetTabDraft={setTabDraft}
           onCommitTabCwd={commitTabCwd}
           onBrowseTabCwd={browseTabCwd}
-          onSetTabCoworker={handleSetTabCoworker}
+          onSetTabCoworker={activeTab?.agentId === 'terminal' ? undefined : handleSetTabCoworker}
         />
 
         <div className="border-beam relative flex-1 overflow-hidden rounded-xl bg-black">
@@ -200,6 +204,8 @@ export default function App() {
                     initialPrompt={t.initialPrompt}
                     isCronJob={t.isCronJob}
                     coworkerId={t.coworkerId}
+                    providerId={t.providerId}
+                    modelId={t.modelId}
                     onAgentSessionId={(id) => updateTabSessionId(t.id, id)}
                   />
                 )}
@@ -217,6 +223,7 @@ export default function App() {
           onSectionChange={setSettingsSection}
           home={home}
           onSaved={() => void refreshAgents(setAgentList)}
+          onProvidersCfgChange={(cfg) => setProvidersList(cfg.profiles ?? [])}
           agentHistory={agentHistory}
           agentHistoryLoading={agentHistoryLoading}
           onRestoreHistory={(entry) => {
