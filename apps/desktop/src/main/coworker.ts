@@ -421,6 +421,37 @@ const PRESET_ONLINE_COWORKERS: CoWorker[] = [
 const REGISTRY_URL =
   'https://raw.githubusercontent.com/unbug/tday/main/CoWorkers.md';
 
+/**
+ * Derive a stable, unique ID slug for a registry entry from its URL.
+ * - GitHub /blob/ URLs: `repo-pathdiscriminator` (parent dir for generic filenames, filename otherwise)
+ * - Bare repo URLs: just the repo name
+ */
+function deriveRegistrySlug(url: string): string {
+  const blobMatch = url.match(/^https?:\/\/github\.com\/[^/]+\/([^/]+)\/blob\/[^/]+\/(.+)$/);
+  if (blobMatch) {
+    const repo = blobMatch[1];
+    const filePath = blobMatch[2];
+    const segments = filePath.split('/').filter(Boolean);
+    // Root-level file (e.g. SKILL.md, .cursorrules) — repo name is sufficient
+    if (segments.length === 1) {
+      return repo.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    }
+    // Multi-segment: use parent dir as discriminator for generic leaf names
+    const leaf = decodeURIComponent(segments[segments.length - 1]).replace(/^\./, '').replace(/\.[^.]+$/, '').toLowerCase();
+    const parent = decodeURIComponent(segments[segments.length - 2]).toLowerCase();
+    const genericLeaves = ['system', 'index', 'readme', 'prompt', 'cursorrules', 'skill', 'agent', ''];
+    const discriminator = genericLeaves.includes(leaf) ? parent : leaf;
+    const cleanRepo = repo.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    const cleanDisc = discriminator.replace(/[^a-z0-9]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    return cleanDisc ? `${cleanRepo}-${cleanDisc}` : cleanRepo;
+  }
+  const repoMatch = url.match(/^https?:\/\/(?:github\.com|raw\.githubusercontent\.com)\/[^/]+\/([^/?#]+)/);
+  if (repoMatch) {
+    return repoMatch[1].toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  }
+  return url.replace(/\/$/, '').split('/').pop()!.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+}
+
 /** Path to the locally cached registry file. */
 function getRegistryCachePath(): string {
   return join(homedir(), '.tday', 'coworkers', 'registry.md');
@@ -454,14 +485,7 @@ export function parseCoworkersRegistry(text: string): CoWorker[] {
     // Skip header row
     if (name === 'name' || url === 'url') continue;
     if (!name || !url) continue;
-    // Derive a stable id from the GitHub repo name (owner/REPO), or fall back to last path segment.
-    // This ensures file-path URLs like /blob/main/SKILL.md produce the same id as bare repo URLs.
-    const githubRepoMatch = url.match(/^https?:\/\/(?:github\.com|raw\.githubusercontent\.com)\/[^/]+\/([^/?#]+)/);
-    const rawSlug = githubRepoMatch
-      ? githubRepoMatch[1]
-      : url.replace(/\/$/, '').split('/').pop()!;
-    const slug = rawSlug.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-    const id = `online:${slug}`;
+    const id = `online:${deriveRegistrySlug(url)}`;
     results.push({
       id,
       name,
@@ -483,22 +507,18 @@ export function parseCoworkersRegistry(text: string): CoWorker[] {
  * Falls back to the hardcoded PRESET_ONLINE_COWORKERS list if neither is available.
  */
 function loadRegistryPresets(): CoWorker[] {
-  // Try runtime cache first (updated by background refresh)
+  // Load both cache and bundled; use whichever has more entries.
+  // This ensures a corrupted/stale cache (fewer entries) never beats the bundled file.
+  let cacheEntries: CoWorker[] = [];
+  let bundledEntries: CoWorker[] = [];
   const cachePath = getRegistryCachePath();
   if (existsSync(cachePath)) {
-    try {
-      const text = readFileSync(cachePath, 'utf8');
-      const parsed = parseCoworkersRegistry(text);
-      if (parsed.length > 0) return applyStarsCache(parsed);
-    } catch { /* fall through */ }
+    try { cacheEntries = parseCoworkersRegistry(readFileSync(cachePath, 'utf8')); } catch { /* skip */ }
   }
-  // Fall back to bundled copy
-  try {
-    const text = readFileSync(getBundledRegistryPath(), 'utf8');
-    const parsed = parseCoworkersRegistry(text);
-    if (parsed.length > 0) return applyStarsCache(parsed);
-  } catch { /* fall through */ }
-  // Final fallback: hardcoded list
+  try { bundledEntries = parseCoworkersRegistry(readFileSync(getBundledRegistryPath(), 'utf8')); } catch { /* skip */ }
+  // Prefer cache when it has >= bundled (more recently fetched from GitHub)
+  const best = cacheEntries.length >= bundledEntries.length ? cacheEntries : bundledEntries;
+  if (best.length > 0) return applyStarsCache(best);
   return applyStarsCache(PRESET_ONLINE_COWORKERS);
 }
 
