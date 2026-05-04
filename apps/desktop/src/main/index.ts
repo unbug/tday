@@ -292,23 +292,39 @@ function registerIpc(): void {
 
       env = piLike.env;
 
-      // claude-code only reads ANTHROPIC_* env vars for API routing. If no explicit
-      // override is applied here, it silently inherits ANTHROPIC_BASE_URL from the
-      // shell (e.g. a DeepSeek endpoint) even when the chosen provider is something
-      // completely different (LM Studio, Ollama, …). Always override / clean these.
+      // claude-code reads its ~/.claude/settings.json *after* the process env, so
+      // any `env.*` keys in that file (e.g. ANTHROPIC_BASE_URL pointing at DeepSeek)
+      // silently override whatever tday injects via process.env. The only reliable
+      // way to win is to pass --settings with a JSON snippet that is applied *after*
+      // the user's settings.json. We inject the provider URL / key / model there so
+      // claude-code always uses the provider Tday chose.
       if (req.agentId === 'claude-code' && effectiveProvider) {
         const cp = effectiveProvider;
-        // Re-inject regardless of apiStyle so we always win over process.env
         const resolvedUrl = gatewayResolution?.baseUrl ?? cp.baseUrl;
+
+        // Build the override object that will be passed via --settings.
+        const settingsOverride: Record<string, unknown> = {
+          // Clear model aliases that may be set to a different provider's models.
+          env: {} as Record<string, string>,
+        };
+        const envOverride = settingsOverride.env as Record<string, string>;
+
         if (resolvedUrl) {
-          env.ANTHROPIC_BASE_URL = resolvedUrl;
-          env.ANTHROPIC_API_URL  = resolvedUrl;
-        } else {
-          // Native Anthropic – remove any URL that might point elsewhere
-          delete env.ANTHROPIC_BASE_URL;
-          delete env.ANTHROPIC_API_URL;
+          envOverride.ANTHROPIC_BASE_URL    = resolvedUrl;
+          envOverride.ANTHROPIC_API_URL     = resolvedUrl;
+          // Prevent the alias env vars from routing to a different model/endpoint.
+          envOverride.ANTHROPIC_MODEL                  = '';
+          envOverride.ANTHROPIC_DEFAULT_OPUS_MODEL     = '';
+          envOverride.ANTHROPIC_DEFAULT_SONNET_MODEL   = '';
+          envOverride.ANTHROPIC_DEFAULT_HAIKU_MODEL    = '';
+          envOverride.CLAUDE_CODE_SUBAGENT_MODEL       = '';
         }
-        if (cp.apiKey) env.ANTHROPIC_API_KEY = cp.apiKey;
+        if (cp.apiKey) {
+          envOverride.ANTHROPIC_API_KEY = cp.apiKey;
+        }
+
+        // --settings accepts a JSON string; tday appends it to args before the prompt.
+        args = ['--settings', JSON.stringify(settingsOverride), ...args];
       }
 
       if (req.agentId === 'deepseek-tui' && effectiveProvider) {
