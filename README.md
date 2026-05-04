@@ -10,7 +10,7 @@
       width="1200"
       height="800"
       alt="Tday Demo Video on X"
-      src="https://github.com/user-attachments/assets/5d7ac6d9-cf0a-4eb3-b865-71ffbd11806b"
+      src="https://github.com/user-attachments/assets/ba6c8041-173f-44bb-90d6-cd72071260df"
     />
   </a>
 </p>
@@ -19,12 +19,38 @@
   <img
     width="49%"
     alt="Tday Screenshot 1"
-    src="https://github.com/user-attachments/assets/77499913-ef2b-40a0-a0d3-88b779e337a0"
+    src="https://github.com/user-attachments/assets/c196629b-5ee4-46dd-b1e3-d0ba86ab66b9"
   />
   <img
     width="49%"
     alt="Tday Screenshot 2"
-    src="https://github.com/user-attachments/assets/1964db7f-2db3-4eed-92a7-65eb172d33ed"
+    src="https://github.com/user-attachments/assets/27bf23af-a5f6-4457-8cc7-7f6085829733"
+  />
+</p>
+
+<p align="center">
+  <img
+    width="49%"
+    alt="Tday Screenshot 3"
+    src="https://github.com/user-attachments/assets/9dc6b149-80d4-4175-839a-3102960f2457"
+  />
+  <img
+    width="49%"
+    alt="Tday Screenshot 4"
+    src="https://github.com/user-attachments/assets/4990e941-0b65-4d25-9d3e-b46e3dd1f67e"
+  />
+</p>
+
+<p align="center">
+  <img
+    width="49%"
+    alt="Tday Screenshot 5"
+    src="https://github.com/user-attachments/assets/2512a05f-e373-469f-859c-16b745da82a4"
+  />
+  <img
+    width="49%"
+    alt="Tday Screenshot 6"
+    src="https://github.com/user-attachments/assets/01c3ef52-3080-4d73-811d-0cb7759d275d"
   />
 </p>
 
