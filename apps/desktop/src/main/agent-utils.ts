@@ -324,7 +324,19 @@ export function modelFlagsFor(
       return ['--model', modelId];
     }
     case 'opencode': {
-      const composed = model.includes('/') ? model : `${opencodeProviderId(providerKind)}/${model}`;
+      const LOCAL_OAI_COMPAT = new Set(['ollama', 'lmstudio', 'litellm', 'vllm', 'sglang']);
+      // Local servers (LM Studio, Ollama, …) store model IDs with an embedded
+      // server-side prefix, e.g. "qwen/qwen3.6-35b-a3b". Passing that raw value
+      // makes OpenCode interpret "qwen" as Alibaba DashScope and display the
+      // wrong provider/model name. Strip the embedded prefix first, then
+      // prepend the correct opencode provider id (e.g. "lmstudio").
+      const bareModel =
+        providerKind && LOCAL_OAI_COMPAT.has(providerKind) && model.includes('/')
+          ? model.replace(/^[^/]+\//, '')
+          : model;
+      const composed = bareModel.includes('/')
+        ? bareModel
+        : `${opencodeProviderId(providerKind)}/${bareModel}`;
       return ['--model', composed];
     }
     case 'gemini':
