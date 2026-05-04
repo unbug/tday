@@ -114,12 +114,24 @@ export function CronSection({
           })}
         </div>
         <div className="shrink-0 border-t border-zinc-800/60 p-2">
-          <button
-            onClick={onOpenNew}
-            className="w-full rounded-md px-2 py-2 text-left text-[11px] text-fuchsia-300 hover:bg-zinc-900"
-          >
-            + Add cron job
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={onOpenNew}
+              className="flex-1 rounded-md px-2 py-2 text-left text-[11px] text-fuchsia-300 hover:bg-zinc-900"
+            >
+              + Add cron job
+            </button>
+            <button
+              onClick={() => void onRefreshStats()}
+              title="Refresh stats"
+              className="rounded-md px-2 py-2 text-[11px] text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300"
+            >
+              <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+                <path d="M9.5 5.5A4 4 0 1 1 5.5 1.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                <path d="M5.5 1.5L7.5 3.5M5.5 1.5L7.5-.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -312,15 +324,6 @@ export function CronSection({
         ) : (
           /* ── Stats dashboard ── */
           <div>
-            <div className="mb-3 flex items-center justify-end">
-              <button
-                onClick={() => void onRefreshStats()}
-                className="rounded-md border border-zinc-700 px-2.5 py-1 text-[11px] text-zinc-400 hover:bg-zinc-800"
-              >
-                Refresh
-              </button>
-            </div>
-
             {jobs.length === 0 ? (
               <div className="flex flex-col items-center gap-3 py-12 text-center">
                 <div className="text-3xl text-zinc-700">⏰</div>

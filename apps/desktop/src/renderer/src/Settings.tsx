@@ -85,24 +85,28 @@ export function Settings({
   useEffect(() => {
     if (!open) return;
     if (initialSection) setSection(initialSection);
-    // Always refresh agents (may have changed since last open); only load providers
-    // if not yet cached — ProvidersSection updates cfg via onCfgChange when user edits.
-    void (async () => {
-      const [c, a] = await Promise.all([
-        cfg ? Promise.resolve(cfg) : (window.tday.listProviders() as Promise<ProvidersConfig>),
-        window.tday.listAgents() as Promise<AgentInfo[]>,
-      ]);
-      setCfg(c);
-      setAgents(a);
-    })();
+
+    // ── Slow IPC calls: only fetch when state is empty (first open) ──────────
+    // listAgents() spawns subprocesses to detect installed tools (which codex, etc.)
+    // and is the main cause of re-render stutter on every open. Skip if already loaded.
+    if (!cfg) {
+      void window.tday.listProviders().then((c) => setCfg(c as ProvidersConfig));
+    }
+    if (agents.length === 0) {
+      void window.tday.listAgents().then((a) => setAgents(a as AgentInfo[]));
+    }
+    if (coworkers.length === 0) {
+      void window.tday.listCoworkers().then((cws) => setCoworkers(cws));
+    }
+
+    // ── Fast / time-sensitive: always refresh on open ─────────────────────
     void window.tday.getAllSettings().then((s) => {
       setShared(s['tday:sharedAgentConfig'] === true);
     });
-    void Promise.all([window.tday.listCronJobs(), window.tday.getCronStats(), window.tday.listCoworkers()]).then(
-      ([jobs, stats, cws]) => {
+    void Promise.all([window.tday.listCronJobs(), window.tday.getCronStats()]).then(
+      ([jobs, stats]) => {
         setCronJobs(jobs);
         setCronStats(stats);
-        setCoworkers(cws);
       },
     );
   // eslint-disable-next-line react-hooks/exhaustive-deps
