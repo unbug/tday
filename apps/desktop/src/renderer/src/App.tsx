@@ -1,5 +1,5 @@
 import { startTransition, useEffect, useState } from 'react';
-import type { AgentId, AgentInfo, CoWorker, ProviderProfile } from '@tday/shared';
+import type { AgentId, AgentInfo, CoWorker, ProviderProfile, ProvidersConfig } from '@tday/shared';
 import { Terminal } from './Terminal';
 import { Settings } from './Settings';
 import { TabBar } from './components/TabBar';
@@ -33,6 +33,26 @@ export default function App() {
   const [settingsMounted, setSettingsMounted] = useState(false);
   const [logoHintActive, setLogoHintActive] = useState(false);
   useEffect(() => { if (settingsOpen) setSettingsMounted(true); }, [settingsOpen]);
+
+  // Background idle refresh: when Settings closes, silently re-fetch slow data
+  // during browser idle time so it never competes with UI work.
+  useEffect(() => {
+    if (settingsOpen) return; // only on close
+    const doRefresh = () => {
+      void window.tday.listAgents().then((a) => setAgentList(a as AgentInfo[]));
+      void window.tday.listCoworkers().then(setCoworkers);
+      void (window.tday.listProviders as () => Promise<{ profiles: ProviderProfile[] }>)().then(
+        (c) => setProvidersList(c.profiles ?? []),
+      );
+    };
+    if (typeof requestIdleCallback !== 'undefined') {
+      const id = requestIdleCallback(doRefresh, { timeout: 5000 });
+      return () => cancelIdleCallback(id);
+    }
+    // Fallback for environments without requestIdleCallback (e.g. old Electron)
+    const id = setTimeout(doRefresh, 1000);
+    return () => clearTimeout(id);
+  }, [settingsOpen]);
 
   const { hasUpdate, latestVersion } = useUpdateCheck();
   const { keepAwakeId, toggleKeepAwake, initKeepAwake } = useKeepAwake();
@@ -224,6 +244,12 @@ export default function App() {
           home={home}
           onSaved={() => void refreshAgents(setAgentList)}
           onProvidersCfgChange={(cfg) => setProvidersList(cfg.profiles ?? [])}
+          agents={agentList}
+          onAgentsChange={(a) => setAgentList(a as AgentInfo[])}
+          coworkers={coworkers}
+          onCoworkersChange={setCoworkers}
+          cfg={{ profiles: providersList } as ProvidersConfig}
+          onCfgChange={(cfg) => setProvidersList(cfg.profiles ?? [])}
           agentHistory={agentHistory}
           agentHistoryLoading={agentHistoryLoading}
           onRestoreHistory={(entry) => {

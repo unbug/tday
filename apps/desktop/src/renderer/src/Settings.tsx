@@ -22,6 +22,13 @@ interface Props {
   onRestoreHistory?: (entry: AgentHistoryEntry) => void;
   onHideHistory?: (id: string) => void;
   home?: string;
+  // Lifted from App — data owned by App, passed in to avoid duplicate loading
+  agents?: AgentInfo[];
+  onAgentsChange?: (agents: AgentInfo[]) => void;
+  coworkers?: CoWorker[];
+  onCoworkersChange?: (coworkers: CoWorker[]) => void;
+  cfg?: ProvidersConfig | null;
+  onCfgChange?: (cfg: ProvidersConfig) => void;
 }
 
 const TABS: { id: Section; label: string }[] = [
@@ -45,18 +52,31 @@ export function Settings({
   onHideHistory,
   home = '~',
   onSectionChange,
+  agents: agentsProp = [],
+  onAgentsChange,
+  coworkers: coworkersProp = [],
+  onCoworkersChange,
+  cfg: cfgProp = null,
+  onCfgChange,
 }: Props) {
   const [section, setSection] = useState<Section>(initialSection ?? 'usage');
   const changeSection = (s: Section) => { setSection(s); onSectionChange?.(s); };
-  const [cfg, setCfg] = useState<ProvidersConfig | null>(null);
-  const [agents, setAgents] = useState<AgentInfo[]>([]);
+  // Local state — synced from props; mutations propagate back via callbacks
+  const [cfg, setCfg] = useState<ProvidersConfig | null>(cfgProp);
+  const [agents, setAgents] = useState<AgentInfo[]>(agentsProp);
   const [shared, setShared] = useState(false);
   const [cronJobs, setCronJobs] = useState<CronJob[]>([]);
   const [cronStats, setCronStats] = useState<Record<string, CronJobStats>>({});
   const [cronEditId, setCronEditId] = useState<string | null>(null);
   const [cronDraft, setCronDraft] = useState<Partial<CronJob>>({});
   const [cronSaving, setCronSaving] = useState(false);
-  const [coworkers, setCoworkers] = useState<CoWorker[]>([]);
+  // coworkers comes from App — no local copy needed
+  const coworkers = coworkersProp;
+  const setCoworkers = (cws: CoWorker[]) => onCoworkersChange?.(cws);
+
+  // Sync incoming prop changes (from App background refresh) into local state
+  useEffect(() => { if (agentsProp.length > 0) setAgents(agentsProp); }, [agentsProp]);
+  useEffect(() => { if (cfgProp) setCfg(cfgProp); }, [cfgProp]);
   const [dialogSize, setDialogSize] = useState(() => ({
     w: Math.min(1100, Math.round(window.innerWidth * 0.97)),
     h: Math.min(740, Math.round(window.innerHeight * 0.93)),
@@ -85,24 +105,12 @@ export function Settings({
   useEffect(() => {
     if (!open) return;
     if (initialSection) setSection(initialSection);
-
-    // ── Slow IPC calls: only fetch when state is empty (first open) ──────────
-    // listAgents() spawns subprocesses to detect installed tools (which codex, etc.)
-    // and is the main cause of re-render stutter on every open. Skip if already loaded.
-    if (!cfg) {
-      void window.tday.listProviders().then((c) => setCfg(c as ProvidersConfig));
-    }
-    if (agents.length === 0) {
-      void window.tday.listAgents().then((a) => setAgents(a as AgentInfo[]));
-    }
-    if (coworkers.length === 0) {
-      void window.tday.listCoworkers().then((cws) => setCoworkers(cws));
-    }
-
-    // ── Fast / time-sensitive: always refresh on open ─────────────────────
+    // agents / coworkers / cfg are owned by App and passed via props — no IPC here.
+    // getAllSettings is fast (in-memory) — always refresh for shared flag.
     void window.tday.getAllSettings().then((s) => {
       setShared(s['tday:sharedAgentConfig'] === true);
     });
+    // Cron data is time-sensitive — always refresh on open.
     void Promise.all([window.tday.listCronJobs(), window.tday.getCronStats()]).then(
       ([jobs, stats]) => {
         setCronJobs(jobs);
@@ -238,14 +246,14 @@ export function Settings({
           {section === 'providers' && (
             <ProvidersSection
               cfg={cfg}
-              onCfgChange={(newCfg) => { setCfg(newCfg); onProvidersCfgChange?.(newCfg); }}
+              onCfgChange={(newCfg) => { setCfg(newCfg); onCfgChange?.(newCfg); onProvidersCfgChange?.(newCfg); }}
               onSaved={onSaved ?? (() => {})}
             />
           )}
           {section === 'agents' && (
             <AgentsSection
               agents={agents}
-              onAgentsChange={setAgents}
+              onAgentsChange={(a) => { setAgents(a); onAgentsChange?.(a); }}
               cfg={cfg}
               shared={shared}
               onSharedChange={setShared}
