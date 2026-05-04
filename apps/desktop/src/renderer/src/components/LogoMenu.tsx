@@ -11,6 +11,7 @@ function fmtTokens(n: number): string {
 
 interface LogoMenuProps {
   hasUpdate: boolean;
+  latestVersion?: string | null;
   keepAwakeId: number | null;
   tabHistory: TabHistoryEntry[];
   agentHistory: AgentHistoryEntry[];
@@ -23,7 +24,7 @@ interface LogoMenuProps {
 }
 
 export function LogoMenu({
-  hasUpdate, keepAwakeId, tabHistory: _tabHistory,
+  hasUpdate, latestVersion, keepAwakeId, tabHistory: _tabHistory,
   agentHistory, agentHistoryLoading, platform, forceOpen = false,
   onToggleKeepAwake, onRestoreFromAgentHistory, onOpenSettings,
 }: LogoMenuProps) {
@@ -69,14 +70,16 @@ export function LogoMenu({
         className="no-drag group relative flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-zinc-900"
         aria-label="Tday menu"
       >
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-          className="text-zinc-600 transition-colors group-hover:text-zinc-400">
-          <circle cx="12" cy="12" r="3" />
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-        </svg>
-        {hasUpdate && (
-          <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-emerald-400 ring-1 ring-[#0a0a0f]" />
-        )}
+        <div className="relative">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+            className="text-zinc-600 transition-colors group-hover:text-zinc-400">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+          {hasUpdate && (
+            <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-emerald-400 ring-1 ring-[#0a0a0f]" />
+          )}
+        </div>
         {platform !== 'win32' && <Logo size={24} />}
       </button>
 
@@ -119,7 +122,7 @@ export function LogoMenu({
                     historySubmenuTimer.current = setTimeout(() => setShowHistorySubmenu(false), 350);
                   }}
                 >
-                  <div className="w-80 rounded-md border border-zinc-800 bg-zinc-950 py-1 shadow-2xl text-xs">
+                  <div className="w-96 rounded-md border border-zinc-800 bg-zinc-950 py-1 shadow-2xl text-xs">
                     {agentHistoryLoading ? (
                       <div className="px-3 py-3 text-center text-zinc-600">Loading…</div>
                     ) : agentHistory.length === 0 ? (
@@ -251,7 +254,11 @@ export function LogoMenu({
                   <polyline points="16 3 21 3 21 8" /><line x1="4" y1="20" x2="21" y2="3" />
                 </svg>
                 <span className="flex-1 font-mono">v{__APP_VERSION__}</span>
-                {hasUpdate && <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />}
+                {hasUpdate && (
+                  <span className="rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-medium text-emerald-300">
+                    {latestVersion ? `v${latestVersion} NEW` : 'NEW'}
+                  </span>
+                )}
               </button>
             </div>
           </div>

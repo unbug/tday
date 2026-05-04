@@ -16,6 +16,8 @@ extraResources:
     to: CoWorkers
     filter:
       - "**/*.md"
+  - from: resources/CoWorkers.md
+    to: CoWorkers.md
 
 # ── macOS ──────────────────────────────────────────────────────────────────────
 mac:

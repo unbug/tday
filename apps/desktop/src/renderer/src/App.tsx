@@ -33,7 +33,7 @@ export default function App() {
   const [logoHintActive, setLogoHintActive] = useState(false);
   useEffect(() => { if (settingsOpen) setSettingsMounted(true); }, [settingsOpen]);
 
-  const { hasUpdate } = useUpdateCheck();
+  const { hasUpdate, latestVersion } = useUpdateCheck();
   const { keepAwakeId, toggleKeepAwake, initKeepAwake } = useKeepAwake();
   const { installing, installPct, installStatus, installLog, refreshAgents, maybeAutoInstall } = useAgentInstall();
 
@@ -136,6 +136,7 @@ export default function App() {
         <div className="self-start shrink-0 bg-[#0a0a0f] py-1.5 pr-4">
           <LogoMenu
             hasUpdate={hasUpdate}
+            latestVersion={latestVersion}
             keepAwakeId={keepAwakeId}
             tabHistory={tabHistory}
             agentHistory={agentHistory}

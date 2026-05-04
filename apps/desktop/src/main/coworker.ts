@@ -86,7 +86,7 @@ function readUrlCacheContent(id: string): string {
 }
 
 /**
- * Convert a GitHub page URL to a raw.githubusercontent.com URL.
+ * Convert a GitHub /blob/ URL to a raw.githubusercontent.com URL.
  * Handles /blob/ URLs; leaves raw / other URLs unchanged.
  */
 export function normalizeGitHubUrl(url: string): string {
@@ -100,18 +100,54 @@ export function normalizeGitHubUrl(url: string): string {
 }
 
 /**
+ * Build an ordered list of raw URLs to try for a given coworker URL.
+ * - Specific /blob/ URLs → single raw URL.
+ * - Bare repo URLs (github.com/owner/repo) → try SKILL.md / AGENT.md on main then master.
+ * - Already raw or non-GitHub → returned as-is.
+ */
+function buildFetchUrls(url: string): string[] {
+  const trimmed = url.trim();
+  const blobRe = /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/([^/]+)\/.+$/;
+  if (blobRe.test(trimmed)) return [normalizeGitHubUrl(trimmed)];
+
+  if (trimmed.includes('raw.githubusercontent.com') || !trimmed.includes('github.com')) {
+    return [trimmed];
+  }
+
+  // Bare repo URL: try common skill/agent file locations across main and master
+  const repoRe = /^https?:\/\/github\.com\/([^/]+)\/([^/]+?)\/?$/;
+  const m = trimmed.match(repoRe);
+  if (m) {
+    const base = `https://raw.githubusercontent.com/${m[1]}/${m[2]}`;
+    return [
+      `${base}/main/SKILL.md`,
+      `${base}/master/SKILL.md`,
+      `${base}/main/AGENT.md`,
+      `${base}/master/AGENT.md`,
+    ];
+  }
+  return [trimmed];
+}
+
+/**
  * Fetch a GitHub (or raw) URL, write content to the local cache, return content.
- * Works for both `online:*` and `custom:*` URL-backed coworkers.
+ * For bare repo URLs, automatically tries multiple candidate file paths in order.
  */
 export async function refreshCoworkerUrlCache(id: string, url: string): Promise<string> {
-  const rawUrl = normalizeGitHubUrl(url.trim());
-  const res = await fetch(rawUrl);
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${rawUrl}`);
-  const content = await res.text();
-  const cachePath = getUrlCachePath(id);
-  mkdirSync(dirname(cachePath), { recursive: true });
-  writeFileSync(cachePath, content, 'utf8');
-  return content;
+  const candidates = buildFetchUrls(url);
+  let lastErr: Error | undefined;
+  for (const rawUrl of candidates) {
+    const res = await fetch(rawUrl);
+    if (res.ok) {
+      const content = await res.text();
+      const cachePath = getUrlCachePath(id);
+      mkdirSync(dirname(cachePath), { recursive: true });
+      writeFileSync(cachePath, content, 'utf8');
+      return content;
+    }
+    lastErr = new Error(`HTTP ${res.status}: ${rawUrl}`);
+  }
+  throw lastErr ?? new Error(`Failed to fetch: ${url}`);
 }
 
 // ── Online coworker store ─────────────────────────────────────────────────────
@@ -143,8 +179,10 @@ export function saveOnlineCoworkers(list: CoWorker[]): void {
  */
 export function scheduleBackgroundRefresh(): void {
   const doRefresh = async () => {
+    // Refresh registry (CoWorkers.md)
+    try { await refreshCoworkersRegistry(); } catch { /* silently skip */ }
     // Refresh user-added online coworkers
-    const online = loadOnlineCoworkers().filter((c) => !PRESET_ONLINE_MAP.has(c.id));
+    const online = loadOnlineCoworkers().filter((c) => !getPresetOnlineMap().has(c.id));
     for (const cw of online) {
       if (!cw.url) continue;
       const mtime = getUrlCacheMtime(cw.id);
@@ -153,7 +191,7 @@ export function scheduleBackgroundRefresh(): void {
     }
     // Refresh preset online coworkers (use URL override from store if present)
     const onlineStore = loadOnlineCoworkers();
-    for (const cw of PRESET_ONLINE_COWORKERS) {
+    for (const cw of getPresetOnlineCoworkers()) {
       const override = onlineStore.find((c) => c.id === cw.id);
       const effectiveUrl = override?.url ?? cw.url;
       if (!effectiveUrl) continue;
@@ -262,14 +300,95 @@ const BUILTIN_MAP = new Map<string, CoWorker>(BUILTIN_COWORKERS.map((c) => [c.id
 // ── Preset online coworkers (content fetched from GitHub, cached locally) ────
 
 const PRESET_ONLINE_COWORKERS: CoWorker[] = [
+  // ── Thinking Frameworks ──────────────────────────────────────────────────
+  {
+    id: 'online:elon-musk',
+    name: 'Elon Musk.skill',
+    emoji: '🚀',
+    description: 'First-principles thinking: rebuild problems from ground-up assumptions',
+    isPreset: true,
+    category: 'Thinking Frameworks',
+    kind: 'online',
+    systemPrompt: '',
+    url: 'https://github.com/alchaincyf/elon-musk-skill',
+  },
+  {
+    id: 'online:steve-jobs',
+    name: 'Steve Jobs.skill',
+    emoji: '🍎',
+    description: 'Product/design/strategy thinking: radical simplicity and user experience',
+    isPreset: true,
+    category: 'Thinking Frameworks',
+    kind: 'online',
+    systemPrompt: '',
+    url: 'https://github.com/alchaincyf/steve-jobs-skill',
+  },
+  {
+    id: 'online:munger',
+    name: 'Charlie Munger.skill',
+    emoji: '🦉',
+    description: 'Mental models and inversion: multi-disciplinary decision frameworks',
+    isPreset: true,
+    category: 'Thinking Frameworks',
+    kind: 'online',
+    systemPrompt: '',
+    url: 'https://github.com/alchaincyf/munger-skill',
+  },
+  {
+    id: 'online:feynman',
+    name: 'Feynman.skill',
+    emoji: '🔬',
+    description: 'Feynman technique: truth-seeking through explanation and first-hand understanding',
+    isPreset: true,
+    category: 'Thinking Frameworks',
+    kind: 'online',
+    systemPrompt: '',
+    url: 'https://github.com/alchaincyf/feynman-skill',
+  },
+  // ── Investment & Business ────────────────────────────────────────────────
+  {
+    id: 'online:buffett',
+    name: 'Buffett OS',
+    emoji: '💎',
+    description: 'Warren Buffett investment framework: moats, margin of safety, long-term compounding',
+    isPreset: true,
+    category: 'Investment & Business',
+    kind: 'online',
+    systemPrompt: '',
+    url: 'https://github.com/will2025btc/buffett-perspective',
+  },
+  {
+    id: 'online:naval',
+    name: 'Naval.skill',
+    emoji: '⚡',
+    description: 'Wealth creation, leverage, and life philosophy distilled from Naval Ravikant',
+    isPreset: true,
+    category: 'Investment & Business',
+    kind: 'online',
+    systemPrompt: '',
+    url: 'https://github.com/alchaincyf/naval-skill',
+  },
+  {
+    id: 'online:paul-graham',
+    name: 'Paul Graham.skill',
+    emoji: '🌱',
+    description: 'Startup thinking from the YC founder: 0-to-1 and product intuition',
+    isPreset: true,
+    category: 'Investment & Business',
+    kind: 'online',
+    systemPrompt: '',
+    url: 'https://github.com/alchaincyf/paul-graham-skill',
+  },
+  // ── AI & Engineering ─────────────────────────────────────────────────────
   {
     id: 'online:karpathy',
-    name: 'Karpathy Code Guidelines',
+    name: 'Karpathy.skill',
     emoji: '🧠',
     description: 'Think before coding, simplicity first, surgical changes, goal-driven execution',
     isPreset: true,
+    category: 'AI & Engineering',
     kind: 'online',
-    systemPrompt: '# Karpathy Code Guidelines\n\nThink before coding. Keep it simple. Make surgical changes.',
+    systemPrompt: '',
     url: 'https://github.com/forrestchang/andrej-karpathy-skills/blob/main/skills/karpathy-guidelines/SKILL.md',
   },
   {
@@ -278,24 +397,131 @@ const PRESET_ONLINE_COWORKERS: CoWorker[] = [
     emoji: '🤖',
     description: 'Automated planning, self-evolving scratchpad, agentic multi-step execution',
     isPreset: true,
+    category: 'AI & Engineering',
     kind: 'online',
-    systemPrompt: '# Devin-style Planner\n\nUse a scratchpad to plan steps. Self-evolve from corrections. Think before acting.',
+    systemPrompt: '',
     url: 'https://github.com/grapeot/devin.cursorrules/blob/master/.cursorrules',
   },
+  // ── Investment Analysis ──────────────────────────────────────────────────
   {
     id: 'online:earnings-analyst',
     name: 'Earnings Call Analyst',
     emoji: '📈',
     description: 'Equity analyst: decode earnings calls, detect management tone shifts and red flags',
     isPreset: true,
+    category: 'Investment Analysis',
     kind: 'online',
-    systemPrompt: '# Earnings Call Analyst\n\nAnalyze earnings transcripts as an equity analyst. Detect red flags, tone shifts, and guidance.',
+    systemPrompt: '',
     url: 'https://github.com/danielmiessler/fabric/blob/main/data/patterns/concall_summary/system.md',
   },
 ];
 
-const PRESET_ONLINE_MAP = new Map<string, CoWorker>(PRESET_ONLINE_COWORKERS.map((c) => [c.id, c]));
+// ── CoWorkers registry (CoWorkers.md from GitHub, bundled as fallback) ────────
 
+const REGISTRY_URL =
+  'https://raw.githubusercontent.com/unbug/tday/main/CoWorkers.md';
+
+/** Path to the locally cached registry file. */
+function getRegistryCachePath(): string {
+  return join(homedir(), '.tday', 'coworkers', 'registry.md');
+}
+
+/** Path to the bundled fallback registry file shipped with the app. */
+function getBundledRegistryPath(): string {
+  if (app.isPackaged) return join(process.resourcesPath, 'CoWorkers.md');
+  return join(app.getAppPath(), 'resources', 'CoWorkers.md');
+}
+
+/**
+ * Parse the pipe-separated CoWorkers.md registry format.
+ * Lines starting with '#' are skipped. Each data line must have 5 fields:
+ *   category|emoji|name|description|url
+ * Returns an array of CoWorker presets (id derived from the url slug).
+ */
+export function parseCoworkersRegistry(text: string): CoWorker[] {
+  const results: CoWorker[] = [];
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const parts = line.split('|');
+    if (parts.length < 5) continue;
+    const [category, emoji, name, description, url] = parts.map((p) => p.trim());
+    if (!name || !url) continue;
+    // Derive a stable id from the GitHub repo name (owner/REPO), or fall back to last path segment.
+    // This ensures file-path URLs like /blob/main/SKILL.md produce the same id as bare repo URLs.
+    const githubRepoMatch = url.match(/^https?:\/\/(?:github\.com|raw\.githubusercontent\.com)\/[^/]+\/([^/?#]+)/);
+    const rawSlug = githubRepoMatch
+      ? githubRepoMatch[1]
+      : url.replace(/\/$/, '').split('/').pop()!;
+    const slug = rawSlug.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    const id = `online:${slug}`;
+    results.push({
+      id,
+      name,
+      emoji: emoji || '🌐',
+      description: description || '',
+      category: category || undefined,
+      isPreset: true,
+      kind: 'online',
+      systemPrompt: '',
+      url,
+    });
+  }
+  return results;
+}
+
+/**
+ * Load registry presets: prefer the locally cached registry (fetched at runtime),
+ * fall back to the bundled copy shipped with the app.
+ * Falls back to the hardcoded PRESET_ONLINE_COWORKERS list if neither is available.
+ */
+function loadRegistryPresets(): CoWorker[] {
+  // Try runtime cache first (updated by background refresh)
+  const cachePath = getRegistryCachePath();
+  if (existsSync(cachePath)) {
+    try {
+      const text = readFileSync(cachePath, 'utf8');
+      const parsed = parseCoworkersRegistry(text);
+      if (parsed.length > 0) return parsed;
+    } catch { /* fall through */ }
+  }
+  // Fall back to bundled copy
+  try {
+    const text = readFileSync(getBundledRegistryPath(), 'utf8');
+    const parsed = parseCoworkersRegistry(text);
+    if (parsed.length > 0) return parsed;
+  } catch { /* fall through */ }
+  // Final fallback: hardcoded list
+  return PRESET_ONLINE_COWORKERS;
+}
+
+/**
+ * Fetch the latest CoWorkers.md registry from GitHub and cache it locally.
+ * On success, reloads the in-memory preset list so the next listAllCoworkers()
+ * call reflects the fresh data without requiring an app restart.
+ */
+export async function refreshCoworkersRegistry(): Promise<void> {
+  const res = await fetch(REGISTRY_URL);
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${REGISTRY_URL}`);
+  const text = await res.text();
+  const parsed = parseCoworkersRegistry(text);
+  if (parsed.length === 0) return; // don't overwrite with an empty/broken list
+  const cachePath = getRegistryCachePath();
+  mkdirSync(dirname(cachePath), { recursive: true });
+  writeFileSync(cachePath, text, 'utf8');
+  // Hot-reload in-memory presets
+  _registryPresets = parsed;
+  _registryMap = new Map(parsed.map((c) => [c.id, c]));
+}
+
+// In-memory registry state (mutable, updated by refreshCoworkersRegistry)
+let _registryPresets: CoWorker[] = loadRegistryPresets();
+let _registryMap: Map<string, CoWorker> = new Map(_registryPresets.map((c) => [c.id, c]));
+
+/** Returns the current in-memory preset online coworkers (registry-backed). */
+function getPresetOnlineCoworkers(): CoWorker[] { return _registryPresets; }
+/** Returns the current in-memory preset online map. */
+function getPresetOnlineMap(): Map<string, CoWorker> { return _registryMap; }
 
 
 export function loadCustomCoworkers(): CoWorker[] {
@@ -326,7 +552,7 @@ export function listAllCoworkers(): CoWorker[] {
     hasUserOverride: existsSync(getUserOverridePath(cw.id)),
   }));
   const onlineStore = loadOnlineCoworkers();
-  const presetOnline = PRESET_ONLINE_COWORKERS.map((cw) => {
+  const presetOnline = getPresetOnlineCoworkers().map((cw) => {
     // Merge URL override if user has stored one
     const override = onlineStore.find((c) => c.id === cw.id);
     return {
@@ -337,7 +563,7 @@ export function listAllCoworkers(): CoWorker[] {
     };
   });
   const userOnline = onlineStore
-    .filter((c) => !PRESET_ONLINE_MAP.has(c.id))
+    .filter((c) => !getPresetOnlineMap().has(c.id))
     .map((cw) => ({
       ...cw,
       kind: 'online' as const,
@@ -389,7 +615,7 @@ export function upsertCoworker(coworker: CoWorker): void {
 /** Delete a non-builtin coworker by id. Also cleans up its URL cache file if present. */
 export function deleteCoworker(id: string): void {
   if (BUILTIN_MAP.has(id)) return;
-  if (PRESET_ONLINE_MAP.has(id)) return; // preset online coworkers cannot be deleted
+  if (getPresetOnlineMap().has(id)) return; // preset online coworkers cannot be deleted
   if (id.startsWith('online:')) {
     saveOnlineCoworkers(loadOnlineCoworkers().filter((c) => c.id !== id));
   } else {
@@ -418,7 +644,7 @@ export function resolveCoworker(id: string): CoWorker | undefined {
       hasUserOverride: existsSync(getUserOverridePath(id)),
     };
   }
-  const preset = PRESET_ONLINE_MAP.get(id);
+  const preset = getPresetOnlineMap().get(id);
   if (preset) {
     // Allow URL override from the online store
     const override = loadOnlineCoworkers().find((c) => c.id === id);

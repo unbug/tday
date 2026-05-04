@@ -44,7 +44,7 @@ import {
 } from './agent-history/index.js';
 import { getAllSettings, setSetting, type JsonValue } from './settings-store.js';
 import { loadCronJobs, saveCronJobs, loadCronStats, CronScheduler } from './cron.js';
-import { listAllCoworkers, upsertCoworker, deleteCoworker, resetBuiltinCoworker, buildEffectivePrompt, normalizeGitHubUrl, refreshCoworkerUrlCache, scheduleBackgroundRefresh, resolveCoworker } from './coworker.js';
+import { listAllCoworkers, upsertCoworker, deleteCoworker, resetBuiltinCoworker, buildEffectivePrompt, normalizeGitHubUrl, refreshCoworkerUrlCache, scheduleBackgroundRefresh, resolveCoworker, refreshCoworkersRegistry, parseCoworkersRegistry } from './coworker.js';
 
 // Modular utilities
 import { PiAdapter } from '@tday/adapter-pi';

@@ -67,7 +67,7 @@ export function HistorySection({ entries, loading, onRestore, onHide }: HistoryS
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
       {/* Agent sidebar */}
-      <div className="scroll-themed flex w-40 shrink-0 flex-col overflow-y-auto border-r border-zinc-800/60 p-2 text-xs">
+      <div className="scroll-themed flex w-56 shrink-0 flex-col overflow-y-auto border-r border-zinc-800/60 p-2 text-xs">
         {[
           { id: 'all', label: 'All' },
           ...agentIds.map((id) => ({ id, label: histAgentLabel(id) })),

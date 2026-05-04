@@ -87,7 +87,7 @@ Today, every coding-agent harness ships with its own CLI, its own provider confi
 | 2 | **Unified agent history** | Every session across all agents is automatically indexed. Browse, search, and restore any past conversation — including working directory and session ID — with one click. |
 | 3 | **Cross-agent usage analytics** | Complete token and cost tracking for every agent and every session. Daily bar chart, by-model and by-agent breakdown tables, 30+ model pricing — all stored locally in SQLite. |
 | 4 | **9 AI agent adapters** | Pi, Claude Code, Codex CLI, GitHub Copilot CLI, OpenCode, Gemini CLI, Qwen-Code, Crush, Hermes — each with auto-detect, one-click install, and per-agent accent color. |
-| 5 | **CoWorker system** | Reusable role personas (Karpathy Code Guidelines, Devin-style Planner, Earnings Call Analyst, 8 built-in engineer roles, or your own) injected as system prompts — selected per tab from the CwdBar, effective immediately. |
+| 5 | **CoWorker system** | Reusable role personas injected as system prompts — selected per tab from the CwdBar. 10 community presets across 4 categories (Thinking Frameworks, Investment & Business, AI & Engineering, Investment Analysis) sourced from [`CoWorkers.md`](./CoWorkers.md), 8 built-in engineer roles, or your own custom/online CoWorkers. Community contributions welcome. |
 | 6 | **Cron job scheduler** | Schedule automated agent tasks with Interval / At Time / Custom cron modes. Human-readable preview, enable/disable, clone, delete, and a live dashboard with next-run countdown and last-status. |
 | 7 | **28-provider settings panel** | CRUD UI for DeepSeek, OpenAI, Anthropic, Gemini, xAI, Groq, Mistral, Ollama, LM Studio, OpenRouter, and 18 more — supports both OpenAI-compatible and Anthropic-compatible base URLs. |
 | 8 | **Per-agent provider & model binding** | Each agent tab runs on a different provider and model. Model flags are projected to CLI arguments at spawn time. Shared-config "all agents one provider" toggle also available. |
@@ -673,6 +673,27 @@ src/renderer/src/
 
 ---
 
-## 12. License
+## 12. Contributing CoWorkers
+
+The [`CoWorkers.md`](./CoWorkers.md) file in this repository is the community-curated source of **preset Online CoWorkers** — GitHub-hosted prompt/skill files that Tday fetches and injects as agent system prompts.
+
+### How to contribute
+
+1. **Fork** this repository
+2. **Add your entry** to the appropriate category table in [`CoWorkers.md`](./CoWorkers.md):
+
+   | Field | Description |
+   |-------|-------------|
+   | Name | Short display name, e.g. `Feynman.skill` |
+   | Description | One sentence describing the thinking style or skill |
+   | GitHub | Direct link to the repo or the prompt file (GitHub blob URL) |
+
+3. **Submit a Pull Request** — please verify the URL is publicly accessible and the content is a valid Markdown prompt
+
+> New categories are welcome. Keep descriptions concise (one sentence). Point to a specific file blob URL for pinned versions, or a repo root for the latest `main`.
+
+---
+
+## 13. License
 
 MIT License

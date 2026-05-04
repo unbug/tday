@@ -10,8 +10,9 @@ function semverGt(a: string, b: string): boolean {
   return aPatch > bPatch;
 }
 
-export function useUpdateCheck(): { hasUpdate: boolean } {
+export function useUpdateCheck(): { hasUpdate: boolean; latestVersion: string | null } {
   const [hasUpdate, setHasUpdate] = useState(false);
+  const [latestVersion, setLatestVersion] = useState<string | null>(null);
 
   useEffect(() => {
     const check = () => {
@@ -21,7 +22,10 @@ export function useUpdateCheck(): { hasUpdate: boolean } {
           if (typeof tag_name === 'string') {
             const remote = tag_name.replace(/^v/, '');
             // Only flag an update when the released version is strictly newer than current.
-            setHasUpdate(semverGt(remote, __APP_VERSION__));
+            if (semverGt(remote, __APP_VERSION__)) {
+              setHasUpdate(true);
+              setLatestVersion(remote);
+            }
           }
         })
         .catch(() => { /* network unavailable — silently ignore */ });
@@ -31,5 +35,5 @@ export function useUpdateCheck(): { hasUpdate: boolean } {
     return () => { clearTimeout(initial); clearInterval(interval); };
   }, []);
 
-  return { hasUpdate };
+  return { hasUpdate, latestVersion };
 }

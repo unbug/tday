@@ -32,6 +32,9 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
   const [previewFetching, setPreviewFetching] = useState(false);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  // Online browse mode
+  const [onlineBrowsing, setOnlineBrowsing] = useState(true);
+  const [onlineCategory, setOnlineCategory] = useState<string>('All');
 
   const builtins = coworkers.filter((c) => c.isBuiltIn ?? c.id.startsWith('builtin:'));
   const presetOnlineList = coworkers.filter((c) => c.isPreset && c.id.startsWith('online:'));
@@ -40,9 +43,18 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
     (c) => !c.isBuiltIn && !c.id.startsWith('builtin:') && !c.id.startsWith('online:'),
   );
 
+  // Derive ordered categories from presets
+  const onlineCategories = ['All', ...Array.from(
+    new Set(presetOnlineList.map((c) => c.category).filter(Boolean) as string[])
+  )];
+
+  const filteredOnlineCards = onlineCategory === 'All'
+    ? presetOnlineList
+    : presetOnlineList.filter((c) => c.category === onlineCategory);
+
   useEffect(() => {
-    if (!selected && coworkers.length > 0) setSelected(coworkers[0]);
-  }, [coworkers, selected]);
+    if (!selected && coworkers.length > 0 && !onlineBrowsing) setSelected(coworkers[0]);
+  }, [coworkers, selected, onlineBrowsing]);
 
   useEffect(() => {
     if (selected && !editing) {
@@ -54,6 +66,16 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
   const selectItem = (cw: CoWorker) => {
     setEditing(false);
     setSelected(cw);
+    setOnlineBrowsing(false);
+    setPreviewContent(null);
+    setPreviewError(null);
+  };
+
+  const selectOnlineCategory = (cat: string) => {
+    setOnlineCategory(cat);
+    setOnlineBrowsing(true);
+    setSelected(null);
+    setEditing(false);
     setPreviewContent(null);
     setPreviewError(null);
   };
@@ -67,6 +89,7 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
       setCustomSource('text');
     }
     setSelected(null);
+    setOnlineBrowsing(false);
     setEditing(true);
     setPreviewContent(null);
     setPreviewError(null);
@@ -94,6 +117,8 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
     setDraft({});
     setPreviewContent(null);
     setPreviewError(null);
+    // Return to online browse if we came from there
+    if (draftKind === 'online') setOnlineBrowsing(true);
   };
 
   const fetchPreview = useCallback(async (url: string) => {
@@ -295,13 +320,37 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
           <SectionLabel label="Built-in" />
           {builtins.map((cw) => <SidebarItem key={cw.id} cw={cw} />)}
 
-          {/* Online */}
+          {/* Online — category filter (二级分类) */}
           <SectionLabel label="Online" />
-          {presetOnlineList.map((cw) => <SidebarItem key={cw.id} cw={cw} />)}
-          {userOnlineList.length === 0 && presetOnlineList.length === 0 && (
-            <p className="px-2 py-1 text-[10px] text-zinc-700">No online CoWorkers</p>
+          <div className="mb-1 flex flex-col gap-0.5">
+            {onlineCategories.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => selectOnlineCategory(cat)}
+                className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors ${
+                  onlineBrowsing && onlineCategory === cat && !editing
+                    ? 'bg-zinc-800 text-zinc-100'
+                    : 'text-zinc-400 hover:bg-zinc-900'
+                }`}
+              >
+                <span className="text-[10px]">
+                  {cat === 'All' ? '🌐' : cat === 'Thinking Frameworks' ? '🧠' : cat === 'Investment & Business' ? '💰' : cat === 'AI & Engineering' ? '🤖' : cat === 'Investment Analysis' ? '📈' : '📁'}
+                </span>
+                <span className="truncate text-[11px]">{cat}</span>
+                <span className="ml-auto shrink-0 text-[10px] text-zinc-600">
+                  {cat === 'All' ? presetOnlineList.length : presetOnlineList.filter((c) => c.category === cat).length}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {/* User-added online coworkers */}
+          {userOnlineList.length > 0 && (
+            <>
+              <p className="mb-1 mt-2 px-2 text-[9px] font-semibold uppercase tracking-wider text-zinc-700">My Online</p>
+              {userOnlineList.map((cw) => <SidebarItem key={cw.id} cw={cw} />)}
+            </>
           )}
-          {userOnlineList.map((cw) => <SidebarItem key={cw.id} cw={cw} />)}
           <button
             onClick={() => openNew('online')}
             className="mt-0.5 w-full rounded-md px-2 py-1 text-left text-[10px] text-sky-400 hover:bg-zinc-900"
@@ -327,10 +376,95 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
       {/* ── Detail panel ── */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
 
-        {/* ── View mode ── */}
-        {viewCoworker && (
+        {/* ── Online browse mode: card grid ── */}
+        {onlineBrowsing && !editing && (
           <div className="flex h-full flex-col overflow-hidden">
-            {/* Header */}
+            <div className="flex shrink-0 items-center gap-2 border-b border-zinc-800 px-4 py-2.5">
+              <span className="flex-1 text-[11px] font-semibold text-zinc-300">
+                {onlineCategory === 'All' ? 'All Online CoWorkers' : onlineCategory}
+                <span className="ml-2 text-[10px] font-normal text-zinc-600">
+                  ({filteredOnlineCards.length})
+                </span>
+              </span>
+              <a
+                href="https://github.com/unbug/tday/blob/main/CoWorkers.md"
+                target="_blank"
+                rel="noreferrer"
+                className="text-[10px] text-sky-500 hover:text-sky-400"
+              >
+                + Contribute
+              </a>
+            </div>
+            <div className="scroll-themed flex-1 overflow-y-auto p-4">
+              {/* Contribute hint */}
+              <div className="mb-4 rounded-md border border-sky-900/40 bg-sky-950/20 px-3 py-2 text-[10px] text-sky-500/80">
+                Community-curated CoWorkers from GitHub. Click a card to view & use it.{' '}
+                <a
+                  href="https://github.com/unbug/tday/blob/main/CoWorkers.md"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline hover:text-sky-400"
+                >
+                  Contribute your own →
+                </a>
+              </div>
+              <div className="grid grid-cols-2 gap-2.5">
+                {filteredOnlineCards.map((cw) => {
+                  const isAdded = !!coworkers.find((c) => c.id === cw.id && !c.isPreset);
+                  return (
+                    <button
+                      key={cw.id}
+                      onClick={() => selectItem(cw)}
+                      className="group flex flex-col rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 text-left transition-colors hover:border-zinc-700 hover:bg-zinc-900"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl leading-none">{cw.emoji}</span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[11px] font-semibold text-zinc-100">{cw.name}</p>
+                          {cw.category && (
+                            <span className="text-[9px] text-zinc-600">{cw.category}</span>
+                          )}
+                        </div>
+                        {isAdded && (
+                          <span className="shrink-0 rounded bg-sky-900/50 px-1 py-px text-[9px] text-sky-400">added</span>
+                        )}
+                      </div>
+                      {cw.description && (
+                        <p className="mt-2 line-clamp-2 text-[10px] leading-relaxed text-zinc-500">
+                          {cw.description}
+                        </p>
+                      )}
+                      {cw.url && (
+                        <p className="mt-1.5 truncate font-mono text-[9px] text-zinc-700 group-hover:text-zinc-500" title={cw.url}>
+                          {cw.url.replace('https://github.com/', 'github/')}
+                        </p>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── View mode ── */}
+        {viewCoworker && !onlineBrowsing && (
+          <div className="flex h-full flex-col overflow-hidden">
+            {/* Back button for online preset items */}
+            {isViewPresetOnline && (
+              <div className="shrink-0 border-b border-zinc-800/40 px-3 py-1.5">
+                <button
+                  onClick={() => selectOnlineCategory(selected.category ?? 'All')}
+                  className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300"
+                >
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                    <path d="M6.5 2L3.5 5L6.5 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  Back to Online
+                </button>
+              </div>
+            )}
+
             <div className="flex items-start gap-3 border-b border-zinc-800 px-4 py-3">
               <span className="mt-0.5 shrink-0 text-2xl leading-none">{selected.emoji}</span>
               <div className="min-w-0 flex-1">
@@ -689,7 +823,7 @@ export function CoWorkerSection({ coworkers, onCoworkersChange }: CoWorkerSectio
         )}
 
         {/* ── Empty state ── */}
-        {!viewCoworker && !editing && (
+        {!viewCoworker && !editing && !onlineBrowsing && (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center text-zinc-600">
             <span className="text-4xl">🤖</span>
             <p className="text-[11px]">Select a CoWorker to view, or create a new one.</p>

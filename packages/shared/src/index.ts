@@ -254,6 +254,8 @@ export interface CoWorker {
   isPreset?: boolean;
   /** True when the user has saved a local override for a built-in preset. */
   hasUserOverride?: boolean;
+  /** Category label for grouping preset online coworkers (e.g. '思维框架', 'AI 与技术'). */
+  category?: string;
   createdAt?: number;
 }
 
