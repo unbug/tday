@@ -226,6 +226,7 @@ function registerIpc(): void {
     let args: string[];
     let env: Record<string, string>;
     let launchCwd: string;
+    let claudeSettingsRestore: (() => void) | null = null;
 
     if (req.agentId === 'pi') {
       const launch = PiAdapter.buildLaunch({
@@ -299,9 +300,8 @@ function registerIpc(): void {
       // tday sets via process.env or --settings.
       //
       // Strategy (following cc-switch): directly patch ~/.claude/settings.json
-      // before spawning. This is the only approach that reliably wins. The
-      // gateway resolution URL (our local proxy for local providers, or the
-      // provider's real URL for cloud providers) becomes the source of truth.
+      // before spawning. We save the original content first and restore it when
+      // the PTY exits, so the user's settings are always preserved.
       if (req.agentId === 'claude-code' && effectiveProvider) {
         const cp = effectiveProvider;
         // gatewayResolution is set when ClaudeCodeLocalAdapter is active (local providers).
@@ -327,22 +327,33 @@ function registerIpc(): void {
           envPatch.ANTHROPIC_AUTH_TOKEN = apiKey;
         }
 
-        // 1. Write ~/.claude/settings.json (permanent, survives --settings priority issues)
+        // Patch ~/.claude/settings.json and schedule a restore on PTY exit.
+        const claudeDir = join(homedir(), '.claude');
+        const claudeSettingsPath = join(claudeDir, 'settings.json');
+        let originalSettings: string | null = null;
         try {
-          const claudeDir = join(homedir(), '.claude');
-          const claudeSettingsPath = join(claudeDir, 'settings.json');
           mkdirSync(claudeDir, { recursive: true });
-          let existing: Record<string, unknown> = {};
-          try {
-            existing = JSON.parse(readFileSync(claudeSettingsPath, 'utf8')) as Record<string, unknown>;
-          } catch { /* file may not exist yet */ }
-          existing.env = { ...(existing.env as Record<string, string> | undefined ?? {}), ...envPatch };
-          // Clear model field at root level too (user may have set it)
-          delete existing.model;
-          writeFileSync(claudeSettingsPath, JSON.stringify(existing, null, 2), 'utf8');
+          // Save original so we can restore it after claude-code exits.
+          try { originalSettings = readFileSync(claudeSettingsPath, 'utf8'); } catch { /* file may not exist */ }
+          const existing: Record<string, unknown> =
+            originalSettings ? (JSON.parse(originalSettings) as Record<string, unknown>) : {};
+          const patched = {
+            ...existing,
+            env: { ...(existing.env as Record<string, string> | undefined ?? {}), ...envPatch },
+          };
+          writeFileSync(claudeSettingsPath, JSON.stringify(patched, null, 2), 'utf8');
         } catch (e) {
           console.warn('[tday] could not patch ~/.claude/settings.json:', e);
         }
+        // Store restore callback — used in pty.onExit below.
+        claudeSettingsRestore = () => {
+          try {
+            if (originalSettings === null) return; // file didn't exist — nothing to restore
+            writeFileSync(claudeSettingsPath, originalSettings, 'utf8');
+          } catch (e) {
+            console.warn('[tday] could not restore ~/.claude/settings.json:', e);
+          }
+        };
 
         // 2. Also set the env vars in our process env for the child process
         Object.assign(env, envPatch);
@@ -451,6 +462,8 @@ function registerIpc(): void {
         event.sender.send(IPC.ptyExit, { tabId: req.tabId, exitCode, signal: signal ?? null });
       }
       if (ptys.get(req.tabId) === pty) ptys.delete(req.tabId);
+      // Restore ~/.claude/settings.json to its pre-launch state.
+      claudeSettingsRestore?.();
     });
 
     return { pid: pty.pid };
