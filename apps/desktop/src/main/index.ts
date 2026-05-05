@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
 import { electronApp } from '@electron-toolkit/utils';
-import { spawn as spawnPty } from 'node-pty';
+import { spawn as spawnPty, type IPty } from 'node-pty';
 import { spawn as spawnChild } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
@@ -435,33 +435,26 @@ function registerIpc(): void {
 
     const resolved = resolveExecutable(cmd, env);
 
+    const isWin = process.platform === 'win32';
+    // cmd.exe path used for Windows fallback (interactive shell approach).
+    const comSpec = isWin
+      ? process.env.ComSpec ?? join(process.env.SystemRoot ?? process.env.WINDIR ?? 'C:\\Windows', 'System32', 'cmd.exe')
+      : null;
+    // Pre-build cmd.exe-safe command line string so it is available for both
+    // "resolveExecutable failed" and "spawn threw" fallback paths.
+    const windowsFallbackCmdLine = isWin
+      ? [cmd, ...args].map((a) => (/[\s"&|<>^()]/.test(a) ? `"${a.replace(/"/g, '""')}"` : a)).join(' ')
+      : null;
+
     let spawnFile: string;
     let spawnArgs: string[];
-    // When set, this command line is written as PTY input after spawn (Windows interactive fallback).
-    let windowsFallbackCmdLine: string | null = null;
 
     if (!resolved.resolved) {
-      if (process.platform === 'win32') {
-        // Ultimate fallback on Windows: spawn an *interactive* cmd.exe (no /c)
-        // and write the agent command as PTY input after the prompt appears.
-        //
-        // Why interactive instead of "cmd.exe /c <agent> <args>":
-        //   - With ConPTY, the spawned *shell* is the ConPTY host.  An
-        //     interactive cmd.exe session properly inherits the PTY for its
-        //     children, so the agent sees isatty()=true and works correctly.
-        //   - "cmd.exe /c" can exit before ConPTY is fully initialised,
-        //     causing signal-propagation edge cases on some Windows builds.
-        //   - Interactive cmd.exe is exactly what the user would get opening
-        //     a cmd.exe window and typing the command — maximally compatible.
-        const comSpec = process.env.ComSpec ??
-          join(process.env.SystemRoot ?? process.env.WINDIR ?? 'C:\\Windows', 'System32', 'cmd.exe');
-        spawnFile = comSpec;
-        spawnArgs = [];  // interactive — no /c
-        // Build a cmd.exe-safe command line string (quote args with spaces/specials).
-        const allParts = [cmd, ...args];
-        windowsFallbackCmdLine = allParts
-          .map((a) => (/[\s"&|<>^()]/.test(a) ? `"${a.replace(/"/g, '""')}"` : a))
-          .join(' ');
+      if (isWin) {
+        // resolveExecutable could not locate the binary — go straight to
+        // interactive cmd.exe (plan B).
+        spawnFile = comSpec!;
+        spawnArgs = [];
       } else {
         const pathParts = (env.PATH ?? '').split(PATH_SEP).filter(Boolean);
         const pathPreview = pathParts.slice(0, 8).join(PATH_SEP);
@@ -475,18 +468,41 @@ function registerIpc(): void {
       ({ file: spawnFile, args: spawnArgs } = windowsCmdWrap(resolved.resolved, args));
     }
 
-    const pty = spawnPty(spawnFile, spawnArgs, {
-      name: 'xterm-256color',
-      cols: req.cols,
-      rows: req.rows,
-      cwd: launchCwd,
-      env,
-    });
+    // Plan A: spawn the resolved binary (or cmd.exe /c wrapper for .cmd files).
+    // Plan B (Windows only): if spawn itself throws (e.g. binary was moved/deleted
+    //   after resolution, or PATH still wrong at CreateProcess level), automatically
+    //   retry with an interactive cmd.exe session and write the command as PTY input.
+    let pty: IPty;
+    let usingInteractiveFallback = isWin && !resolved.resolved; // already on plan B
+    try {
+      pty = spawnPty(spawnFile, spawnArgs, {
+        name: 'xterm-256color',
+        cols: req.cols,
+        rows: req.rows,
+        cwd: launchCwd,
+        env,
+      });
+    } catch (spawnErr) {
+      if (isWin && comSpec && windowsFallbackCmdLine) {
+        // Plan A spawn failed — fall back to interactive cmd.exe automatically.
+        pty = spawnPty(comSpec, [], {
+          name: 'xterm-256color',
+          cols: req.cols,
+          rows: req.rows,
+          cwd: launchCwd,
+          env,
+        });
+        usingInteractiveFallback = true;
+      } else {
+        throw spawnErr;
+      }
+    }
 
     ptys.set(req.tabId, pty);
 
-    // Windows interactive fallback: wait for cmd.exe prompt, then type the command.
-    if (windowsFallbackCmdLine) {
+    // Windows interactive fallback: wait for cmd.exe prompt (~600 ms), then type
+    // the agent command — exactly as if the user had opened cmd.exe and typed it.
+    if (usingInteractiveFallback && windowsFallbackCmdLine) {
       const tabId = req.tabId;
       const cmdLine = windowsFallbackCmdLine;
       setTimeout(() => { ptys.get(tabId)?.write(cmdLine + '\r'); }, 600);
