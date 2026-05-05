@@ -437,19 +437,31 @@ function registerIpc(): void {
 
     let spawnFile: string;
     let spawnArgs: string[];
+    // When set, this command line is written as PTY input after spawn (Windows interactive fallback).
+    let windowsFallbackCmdLine: string | null = null;
 
     if (!resolved.resolved) {
       if (process.platform === 'win32') {
-        // Ultimate fallback on Windows: delegate to cmd.exe /c so that cmd.exe
-        // resolves the binary using its own authoritative PATH (which always
-        // matches what the user sees in a cmd.exe window, regardless of what
-        // Electron inherited from the shortcut launcher).
-        // This mirrors the VS Code / Tabby approach: never try to replicate
-        // cmd.exe's lookup logic — just let cmd.exe do it.
+        // Ultimate fallback on Windows: spawn an *interactive* cmd.exe (no /c)
+        // and write the agent command as PTY input after the prompt appears.
+        //
+        // Why interactive instead of "cmd.exe /c <agent> <args>":
+        //   - With ConPTY, the spawned *shell* is the ConPTY host.  An
+        //     interactive cmd.exe session properly inherits the PTY for its
+        //     children, so the agent sees isatty()=true and works correctly.
+        //   - "cmd.exe /c" can exit before ConPTY is fully initialised,
+        //     causing signal-propagation edge cases on some Windows builds.
+        //   - Interactive cmd.exe is exactly what the user would get opening
+        //     a cmd.exe window and typing the command — maximally compatible.
         const comSpec = process.env.ComSpec ??
           join(process.env.SystemRoot ?? process.env.WINDIR ?? 'C:\\Windows', 'System32', 'cmd.exe');
         spawnFile = comSpec;
-        spawnArgs = ['/c', cmd, ...args];
+        spawnArgs = [];  // interactive — no /c
+        // Build a cmd.exe-safe command line string (quote args with spaces/specials).
+        const allParts = [cmd, ...args];
+        windowsFallbackCmdLine = allParts
+          .map((a) => (/[\s"&|<>^()]/.test(a) ? `"${a.replace(/"/g, '""')}"` : a))
+          .join(' ');
       } else {
         const pathParts = (env.PATH ?? '').split(PATH_SEP).filter(Boolean);
         const pathPreview = pathParts.slice(0, 8).join(PATH_SEP);
@@ -472,6 +484,13 @@ function registerIpc(): void {
     });
 
     ptys.set(req.tabId, pty);
+
+    // Windows interactive fallback: wait for cmd.exe prompt, then type the command.
+    if (windowsFallbackCmdLine) {
+      const tabId = req.tabId;
+      const cmdLine = windowsFallbackCmdLine;
+      setTimeout(() => { ptys.get(tabId)?.write(cmdLine + '\r'); }, 600);
+    }
 
     const initialPromptForPty = req.initialPrompt?.trim();
     const _cliAgents: AgentId[] = [
