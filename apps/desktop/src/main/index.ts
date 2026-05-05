@@ -51,11 +51,12 @@ import { listAllCoworkers, upsertCoworker, deleteCoworker, resetBuiltinCoworker,
 import { PiAdapter } from '@tday/adapter-pi';
 import { PATH_SEP, augmentPath } from './path-utils.js';
 import { normalizeProvidersConfig, appendNoProxy } from './provider-utils.js';
-import { TDAY_DIR, loadAgents, loadProviders, initDefaultConfigs } from './config.js';
+import { TDAY_DIR, loadAgents, loadProviders, initDefaultConfigs, invalidateAgentsCache, invalidateProvidersCache } from './config.js';
 import {
   semverAtLeast,
   INSTALL_SPECS,
   detectGeneric,
+  invalidateDetectCache,
   resolveExecutable,
   normalizeLaunchCwd,
   modelFlagsFor,
@@ -170,6 +171,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.agentsSave, (_e, next: AgentsConfig) => {
     if (!existsSync(TDAY_DIR)) mkdirSync(TDAY_DIR, { recursive: true });
     writeFileSync(join(TDAY_DIR, 'agents.json'), JSON.stringify(next, null, 2) + '\n');
+    invalidateAgentsCache();
     return { ok: true };
   });
 
@@ -179,6 +181,7 @@ function registerIpc(): void {
     if (!existsSync(TDAY_DIR)) mkdirSync(TDAY_DIR, { recursive: true });
     const normalized = normalizeProvidersConfig(next);
     writeFileSync(join(TDAY_DIR, 'providers.json'), JSON.stringify(normalized, null, 2) + '\n');
+    invalidateProvidersCache();
     return { ok: true };
   });
 
@@ -500,9 +503,9 @@ function registerIpc(): void {
   });
 
   // Agent install / update / uninstall
-  ipcMain.handle(IPC.agentInstall,   (event, agentId: AgentId) => runNpmGlobal(event, agentId, 'install',   INSTALL_SPECS[agentId]));
-  ipcMain.handle(IPC.agentUpdate,    (event, agentId: AgentId) => runNpmGlobal(event, agentId, 'update',    INSTALL_SPECS[agentId]));
-  ipcMain.handle(IPC.agentUninstall, (event, agentId: AgentId) => runNpmGlobal(event, agentId, 'uninstall', INSTALL_SPECS[agentId]));
+  ipcMain.handle(IPC.agentInstall,   (event, agentId: AgentId) => runNpmGlobal(event, agentId, 'install',   INSTALL_SPECS[agentId]).then((r) => { invalidateDetectCache(); invalidateAgentsCache(); return r; }));
+  ipcMain.handle(IPC.agentUpdate,    (event, agentId: AgentId) => runNpmGlobal(event, agentId, 'update',    INSTALL_SPECS[agentId]).then((r) => { invalidateDetectCache(); invalidateAgentsCache(); return r; }));
+  ipcMain.handle(IPC.agentUninstall, (event, agentId: AgentId) => runNpmGlobal(event, agentId, 'uninstall', INSTALL_SPECS[agentId]).then((r) => { invalidateDetectCache(); invalidateAgentsCache(); return r; }));
 
   // Local service discovery
   ipcMain.handle(IPC.discoverServices, (_e, req: { extraHosts?: string[]; scanSubnet?: boolean } = {}) =>
@@ -647,6 +650,27 @@ app.whenReady().then(() => {
   }
 
   initDefaultConfigs();
+
+  // Eagerly warm up all hot-caches so the first IPC round-trip from the
+  // renderer hits memory instead of the file-system.
+  // Detection (which + --version) is the real bottleneck: 9 agents × 2 execs
+  // can take 200-2000 ms. Running it here moves that cost to app startup
+  // (before the window is visible) instead of the first settings open.
+  void (async () => {
+    // File caches (fast, synchronous internally, warm them eagerly)
+    getAllSettings();
+    loadAgents();
+    loadProviders();
+    // Detect all agents in parallel using Promise.all with idle scheduling
+    // so the main-thread JS queue is not blocked in a tight loop.
+    const bins = (Object.values(INSTALL_SPECS) as (typeof INSTALL_SPECS[keyof typeof INSTALL_SPECS])[]).flatMap(
+      (spec) => (spec?.bin ? [spec.bin] : []),
+    );
+    await Promise.all(bins.map((bin) => new Promise<void>((resolve) => {
+      setImmediate(() => { detectGeneric(bin); resolve(); });
+    })));
+  })();
+
   electronApp.setAppUserModelId('com.tday.app');
   watchWindowShortcuts();
   setupPowerMonitor();

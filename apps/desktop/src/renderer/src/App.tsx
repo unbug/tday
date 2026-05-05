@@ -66,7 +66,7 @@ export default function App() {
     tabHistory, agentHistory, agentHistoryLoading,
     dragId,
     closeTab, addTab, restoreFromAgentHistory, updateTabSessionId, removeFromAgentHistory,
-    setTabDraft, commitTabCwd, browseTabCwd, setTabCoworker,
+    setTabDraft, commitTabCwd, browseTabCwd, setTabCoworker, refreshAgentHistory,
     onDragStart, onDragOver, onDrop, onDragEnd,
     setLastCwd, initTabs, loadDeferredData,
   } = useTabs(home, defaultAgentId);
@@ -78,15 +78,18 @@ export default function App() {
   // ── Startup: load home, agents, settings in parallel ───────────────────────
   useEffect(() => {
     void (async () => {
-      const [h, list, settings, provCfg] = await Promise.all([
+      // Critical path: only what is needed to restore tabs and pick the default agent.
+      // listProviders and listCoworkers are deferred so they don't block first paint.
+      const [h, list, settings] = await Promise.all([
         window.tday.homeDir(),
         window.tday.listAgents() as Promise<AgentInfo[]>,
         window.tday.getAllSettings(),
-        window.tday.listProviders() as Promise<{ profiles: ProviderProfile[] }>,
       ]);
       setHome(h);
       setAgentList(list);
-      setProvidersList(provCfg.profiles ?? []);
+
+      // Deferred: providers and coworkers are not needed for initial render.
+      void window.tday.listProviders().then((provCfg: { profiles: ProviderProfile[] }) => setProvidersList(provCfg.profiles ?? []));
       void window.tday.listCoworkers().then(setCoworkers);
 
       const initialCwd =
@@ -252,6 +255,7 @@ export default function App() {
           onCfgChange={(cfg) => setProvidersList(cfg.profiles ?? [])}
           agentHistory={agentHistory}
           agentHistoryLoading={agentHistoryLoading}
+          onRefreshHistory={refreshAgentHistory}
           onRestoreHistory={(entry) => {
             restoreFromAgentHistory(entry);
             setSettingsOpen(false);

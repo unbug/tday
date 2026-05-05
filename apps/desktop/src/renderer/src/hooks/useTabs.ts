@@ -34,6 +34,7 @@ export interface TabsHook {
   updateTabSessionId: (tabId: string, sessionId: string | null) => void;
   setTabCoworker: (id: string, coworkerId: string | undefined) => void;
   removeFromAgentHistory: (id: string) => void;
+  refreshAgentHistory: () => void;
   initTabs: (persisted: PersistedTab[], savedActiveId: string | null, fallbackCwd: string, defaultAgentId: AgentId) => void;
   loadDeferredData: (logoHinted: boolean, keepAwake: boolean, onLogoHint: () => void, onKeepAwake: () => void) => void;
 }
@@ -137,6 +138,8 @@ export function useTabs(home: string, defaultAgentId: AgentId): TabsHook {
         await window.tday.pushTabHistory(entry);
         const updated = await window.tday.listTabHistory();
         setTabHistory(updated);
+        // Refresh agentHistory in background so History section stays current.
+        void window.tday.listAgentHistory().then((h) => setAgentHistory(h));
       }
     };
     void saveHistory();
@@ -208,6 +211,14 @@ export function useTabs(home: string, defaultAgentId: AgentId): TabsHook {
 
   const removeFromAgentHistory = (id: string) => {
     setAgentHistory((prev) => prev.filter((e) => e.id !== id));
+  };
+
+  const refreshAgentHistory = () => {
+    setAgentHistoryLoading(true);
+    void window.tday.listAgentHistory().then((h) => {
+      setAgentHistory(h);
+      setAgentHistoryLoading(false);
+    });
   };
 
   const setTabCoworker = (id: string, coworkerId: string | undefined) => {
@@ -299,7 +310,7 @@ export function useTabs(home: string, defaultAgentId: AgentId): TabsHook {
     tabHistory, agentHistory, agentHistoryLoading,
     dragId,
     closeTab, addTab, restoreTab, restoreTabFromHistory, restoreFromAgentHistory,
-    setTabDraft, commitTabCwd, browseTabCwd, updateTabSessionId, setTabCoworker, removeFromAgentHistory,
+    setTabDraft, commitTabCwd, browseTabCwd, updateTabSessionId, setTabCoworker, removeFromAgentHistory, refreshAgentHistory,
     onDragStart, onDragOver, onDrop, onDragEnd,
     setLastCwd, initTabs, loadDeferredData,
   };

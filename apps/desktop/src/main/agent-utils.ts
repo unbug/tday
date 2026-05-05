@@ -123,6 +123,23 @@ export const INSTALL_SPECS: Record<AgentId, AgentInstallSpec | undefined> = {
  * those in `cmd.exe /c` because CreateProcess cannot execute them directly.
  */
 export function detectGeneric(bin: string): { available: boolean; version?: string; error?: string } {
+  const cached = detectCache.get(bin);
+  if (cached !== undefined) return cached;
+  const result = _detectGenericUncached(bin);
+  detectCache.set(bin, result);
+  return result;
+}
+
+/** Invalidate the cached detect result for a specific binary (or all binaries). */
+export function invalidateDetectCache(bin?: string): void {
+  if (bin === undefined) detectCache.clear();
+  else detectCache.delete(bin);
+}
+
+// Cache: binary name → detection result. Populated lazily, invalidated on install/uninstall.
+const detectCache = new Map<string, { available: boolean; version?: string; error?: string }>();
+
+function _detectGenericUncached(bin: string): { available: boolean; version?: string; error?: string } {
   try {
     const whichCmd = process.platform === 'win32' ? 'where' : 'which';
     const raw = execFileSync(whichCmd, [bin], { encoding: 'utf8' }).split(/\r?\n/)[0].trim();

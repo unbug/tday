@@ -19,6 +19,7 @@ interface Props {
   onSectionChange?: (section: Section) => void;
   agentHistory?: AgentHistoryEntry[];
   agentHistoryLoading?: boolean;
+  onRefreshHistory?: () => void;
   onRestoreHistory?: (entry: AgentHistoryEntry) => void;
   onHideHistory?: (id: string) => void;
   home?: string;
@@ -58,6 +59,7 @@ export function Settings({
   onCoworkersChange,
   cfg: cfgProp = null,
   onCfgChange,
+  onRefreshHistory,
 }: Props) {
   const [section, setSection] = useState<Section>(initialSection ?? 'usage');
   const changeSection = (s: Section) => { setSection(s); onSectionChange?.(s); };
@@ -105,6 +107,8 @@ export function Settings({
   useEffect(() => {
     if (!open) return;
     if (initialSection) setSection(initialSection);
+    // Refresh agentHistory so History tab always shows latest sessions.
+    onRefreshHistory?.();
     // agents / coworkers / cfg are owned by App and passed via props — no IPC here.
     // getAllSettings is fast (in-memory) — always refresh for shared flag.
     void window.tday.getAllSettings().then((s) => {

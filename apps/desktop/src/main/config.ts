@@ -59,16 +59,26 @@ export function readJson<T>(path: string, fallback: T): T {
   }
 }
 
+// ── Module-level caches (invalidated on save) ─────────────────────────────────
+
+let agentsCache: AgentsConfig | null = null;
+let providersCache: ProvidersConfig | null = null;
+
+export function invalidateAgentsCache(): void  { agentsCache = null; }
+export function invalidateProvidersCache(): void { providersCache = null; }
+
 export function loadAgents(): AgentsConfig {
-  return readJson<AgentsConfig>(join(TDAY_DIR, 'agents.json'), {});
+  if (agentsCache !== null) return agentsCache;
+  agentsCache = readJson<AgentsConfig>(join(TDAY_DIR, 'agents.json'), {});
+  return agentsCache;
 }
 
 export function loadProviders(): ProvidersConfig {
-  return normalizeProvidersConfig(
-    readJson<ProvidersConfig>(join(TDAY_DIR, 'providers.json'), {
-      profiles: [],
-    }),
+  if (providersCache !== null) return providersCache;
+  providersCache = normalizeProvidersConfig(
+    readJson<ProvidersConfig>(join(TDAY_DIR, 'providers.json'), { profiles: [] }),
   );
+  return providersCache;
 }
 
 /**
