@@ -313,15 +313,12 @@ export function modelFlagsFor(
   if (!model) return [];
   switch (agentId) {
     case 'claude-code': {
-      // Local servers (LM Studio, Ollama, …) prefix model IDs with the provider
-      // name, e.g. "qwen/qwen3.6-35b-a3b". The Anthropic-compatible API rejects
-      // that prefix — strip it when the provider is a local OpenAI-compat service.
-      const LOCAL_OAI_COMPAT = new Set(['ollama', 'lmstudio', 'litellm', 'vllm', 'sglang']);
-      const modelId =
-        providerKind && LOCAL_OAI_COMPAT.has(providerKind) && model.includes('/')
-          ? model.replace(/^[^/]+\//, '')
-          : model;
-      return ['--model', modelId];
+      // Pass the model ID verbatim. LM Studio and Ollama use "publisher/model"
+      // IDs (e.g. "qwen/qwen3.6-35b-a3b") that must be forwarded as-is to
+      // their native Anthropic-compatible endpoint so the server can find the
+      // right loaded model. Cloud providers (DeepSeek, OpenRouter, …) also
+      // receive whatever ID the user configured.
+      return ['--model', model];
     }
     case 'opencode': {
       const LOCAL_OAI_COMPAT = new Set(['ollama', 'lmstudio', 'litellm', 'vllm', 'sglang']);

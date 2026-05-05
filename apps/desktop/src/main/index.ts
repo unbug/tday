@@ -304,8 +304,16 @@ function registerIpc(): void {
       // the PTY exits, so the user's settings are always preserved.
       if (req.agentId === 'claude-code' && effectiveProvider) {
         const cp = effectiveProvider;
-        // gatewayResolution is set when ClaudeCodeLocalAdapter is active (local providers).
-        const resolvedUrl = gatewayResolution?.baseUrl ?? cp.baseUrl;
+        // LM Studio and Ollama expose a native Anthropic-compatible endpoint at
+        // their root URL (e.g. http://localhost:1234), NOT at the /v1 sub-path
+        // that is used for their OpenAI-compat endpoint. The Anthropic SDK
+        // appends /v1/messages automatically, so we must strip the trailing
+        // /v1 that tday stores as the OpenAI base URL.
+        const LOCAL_OAI_COMPAT = new Set(['ollama', 'lmstudio', 'litellm', 'vllm', 'sglang']);
+        const rawUrl = cp.baseUrl ?? '';
+        const resolvedUrl = LOCAL_OAI_COMPAT.has(cp.kind ?? '')
+          ? rawUrl.replace(/\/v1\/?$/, '')   // http://localhost:1234/v1 → http://localhost:1234
+          : rawUrl;
         const apiKey = cp.apiKey ?? 'no-key-required';
 
         // Build the env section to inject. Model override keys are blanked so
