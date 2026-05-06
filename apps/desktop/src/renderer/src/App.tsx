@@ -21,12 +21,13 @@ declare global {
   const __APP_VERSION__: string;
 }
 
-type SettingsSection = 'providers' | 'agents' | 'usage' | 'history' | 'cron' | 'coworkers';
+type SettingsSection = 'providers' | 'agents' | 'usage' | 'history' | 'cron' | 'coworkers' | 'computer-use';
 
 export default function App() {
   const [home, setHome] = useState<string>('~');
   const [agentList, setAgentList] = useState<AgentInfo[]>([]);
   const [providersList, setProvidersList] = useState<ProviderProfile[]>([]);
+  const [providersDefault, setProvidersDefault] = useState<string | undefined>();
   const [coworkers, setCoworkers] = useState<CoWorker[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('usage');
@@ -41,8 +42,8 @@ export default function App() {
     const doRefresh = () => {
       void window.tday.listAgents().then((a) => setAgentList(a as AgentInfo[]));
       void window.tday.listCoworkers().then(setCoworkers);
-      void (window.tday.listProviders as () => Promise<{ profiles: ProviderProfile[] }>)().then(
-        (c) => setProvidersList(c.profiles ?? []),
+      void (window.tday.listProviders as () => Promise<{ profiles: ProviderProfile[]; default?: string }>)().then(
+        (c) => { setProvidersList(c.profiles ?? []); setProvidersDefault(c.default); },
       );
     };
     if (typeof requestIdleCallback !== 'undefined') {
@@ -92,7 +93,7 @@ export default function App() {
         const def = (list.find((a) => a.isDefault)?.id as AgentId | undefined) ?? 'pi';
         maybeAutoInstall(h, list, setAgentList, def);
       });
-      void window.tday.listProviders().then((provCfg: { profiles: ProviderProfile[] }) => setProvidersList(provCfg.profiles ?? []));
+      void window.tday.listProviders().then((provCfg: { profiles: ProviderProfile[]; default?: string }) => { setProvidersList(provCfg.profiles ?? []); setProvidersDefault(provCfg.default); });
       void window.tday.listCoworkers().then(setCoworkers);
 
       const initialCwd =
@@ -248,13 +249,13 @@ export default function App() {
           onSectionChange={setSettingsSection}
           home={home}
           onSaved={() => void refreshAgents(setAgentList)}
-          onProvidersCfgChange={(cfg) => setProvidersList(cfg.profiles ?? [])}
+          onProvidersCfgChange={(cfg) => { setProvidersList(cfg.profiles ?? []); setProvidersDefault(cfg.default); }}
           agents={agentList}
           onAgentsChange={(a) => setAgentList(a as AgentInfo[])}
           coworkers={coworkers}
           onCoworkersChange={setCoworkers}
-          cfg={{ profiles: providersList } as ProvidersConfig}
-          onCfgChange={(cfg) => setProvidersList(cfg.profiles ?? [])}
+          cfg={{ profiles: providersList, default: providersDefault } as ProvidersConfig}
+          onCfgChange={(cfg) => { setProvidersList(cfg.profiles ?? []); setProvidersDefault(cfg.default); }}
           agentHistory={agentHistory}
           agentHistoryLoading={agentHistoryLoading}
           onRefreshHistory={refreshAgentHistory}

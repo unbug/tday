@@ -39,6 +39,47 @@ export interface ConvertedInput {
 // ─── Content normalisation ────────────────────────────────────────────────────
 
 /**
+ * Convert an OpenAI image content part (type: 'input_image') or an already-
+ * Anthropic image block (type: 'image') into an Anthropic image ABlock.
+ * Returns null if the block cannot be converted (e.g. unsupported source).
+ */
+function convertImageBlock(p: Obj): ABlock | null {
+  // Already in Anthropic format — pass through.
+  if (p.type === 'image' && p.source && typeof p.source === 'object') {
+    return p as unknown as ABlock;
+  }
+
+  // OpenAI format: { type: 'input_image', image_url: { url: '...' } }
+  //             or { type: 'input_image', image_url: '...' }
+  const imageUrlField = p.image_url;
+  const rawUrl: string =
+    typeof imageUrlField === 'string'
+      ? imageUrlField
+      : imageUrlField && typeof imageUrlField === 'object'
+      ? String((imageUrlField as Obj).url ?? '')
+      : '';
+
+  if (!rawUrl) return null;
+
+  // data: URI  →  Anthropic base64 source
+  if (rawUrl.startsWith('data:')) {
+    const semiIdx = rawUrl.indexOf(';');
+    const commaIdx = rawUrl.indexOf(',');
+    if (semiIdx === -1 || commaIdx === -1) return null;
+    const mediaType = rawUrl.slice(5, semiIdx); // e.g. 'image/png'
+    const data = rawUrl.slice(commaIdx + 1);
+    return { type: 'image', source: { type: 'base64', media_type: mediaType, data } };
+  }
+
+  // HTTP/HTTPS URL  →  Anthropic url source
+  if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+    return { type: 'image', source: { type: 'url', url: rawUrl } };
+  }
+
+  return null;
+}
+
+/**
  * Normalise any OpenAI content value (string, array, or object) into an array
  * of Anthropic `ABlock`s.
  */
@@ -62,12 +103,24 @@ export function contentBlocksFromContent(content: unknown): ABlock[] {
       if (pType === 'input_text' || pType === 'text' || pType === 'output_text') {
         const text = typeof p.text === 'string' ? p.text : '';
         if (text) blocks.push({ type: 'text', text });
+        continue;
+      }
+      // Image blocks: OpenAI 'input_image' or already-Anthropic 'image'
+      if (pType === 'input_image' || pType === 'image') {
+        const imgBlock = convertImageBlock(p);
+        if (imgBlock) blocks.push(imgBlock);
       }
     }
     return blocks;
   }
   if (typeof content === 'object') {
     const p = content as Obj;
+    // Object-form image block
+    const pType = typeof p.type === 'string' ? p.type : '';
+    if (pType === 'input_image' || pType === 'image') {
+      const imgBlock = convertImageBlock(p);
+      if (imgBlock) return [imgBlock];
+    }
     const text = (p.text ?? p.output_text ?? p.input_text ?? '') as string;
     if (typeof text === 'string' && text.trim()) return [{ type: 'text', text }];
   }
@@ -269,10 +322,17 @@ export function convertInput(
     // function_call_output / local_shell_call_output / tool_result → tool_result
     if (type === 'function_call_output' || type === 'local_shell_call_output' || type === 'tool_result') {
       hasToolHistory = true;
+      // item.output may be a plain string, or an array of content blocks (including images)
+      const rawOutput = item.output;
+      const toolContent: unknown = Array.isArray(rawOutput)
+        ? contentBlocksFromContent(rawOutput)
+        : typeof rawOutput === 'string'
+        ? rawOutput
+        : '';
       appendToolResultBlock(messages, {
         type: 'tool_result',
         tool_use_id: item.call_id ?? item.id ?? '',
-        content: typeof item.output === 'string' ? item.output : '',
+        content: toolContent,
       });
       pendingSummary = undefined;
       continue;

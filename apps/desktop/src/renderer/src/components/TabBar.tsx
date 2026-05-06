@@ -31,7 +31,7 @@ export function TabBar({
   const [menuOnRight, setMenuOnRight] = useState(false);
   const [submenuOnLeft, setSubmenuOnLeft] = useState(false);
   const [hoveredAgentId, setHoveredAgentId] = useState<AgentId | null>(null);
-  const [hoveredTabInfo, setHoveredTabInfo] = useState<{ tab: Tab; x: number; y: number } | null>(null);
+  const [hoveredTabInfo, setHoveredTabInfo] = useState<{ tab: Tab; x: number; y: number; mouseX: number } | null>(null);
   const menuCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const submenuCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuContainerRef = useRef<HTMLDivElement>(null);
@@ -82,7 +82,8 @@ export function TabBar({
               onDragOver={onDragOver}
               onDrop={() => onDrop(t.id)}
               onDragEnd={onDragEnd}
-              onMouseEnter={(e) => { const r = e.currentTarget.getBoundingClientRect(); setHoveredTabInfo({ tab: t, x: r.left, y: r.bottom }); }}
+              onMouseEnter={(e) => { const r = e.currentTarget.getBoundingClientRect(); setHoveredTabInfo({ tab: t, x: r.left, y: r.bottom, mouseX: e.clientX }); }}
+              onMouseMove={(e) => { setHoveredTabInfo((prev) => prev?.tab.id === t.id ? { ...prev, mouseX: e.clientX } : prev); }}
               onMouseLeave={() => setHoveredTabInfo(null)}
               className={`no-drag group relative inline-flex min-w-0 shrink items-center gap-2 rounded-full px-3 py-1 text-xs ${
                 t.id === activeId
@@ -110,12 +111,14 @@ export function TabBar({
       </div>
 
       {/* Tab hover card — rendered outside overflow-hidden via fixed positioning */}
-      {hoveredTabInfo && (() => {
+      {hoveredTabInfo && tabs.some((tab) => tab.id === hoveredTabInfo.tab.id) && (() => {
         const t = hoveredTabInfo.tab;
+        const cardW = 256;
+        const clampedX = Math.min(hoveredTabInfo.mouseX, window.innerWidth - cardW - 8);
         return (
           <div
             className="no-drag pointer-events-none fixed z-50 w-64 rounded-xl border border-zinc-700/50 bg-zinc-950/95 px-3.5 py-2.5 shadow-xl backdrop-blur-sm"
-            style={{ left: hoveredTabInfo.x, top: hoveredTabInfo.y + 6 }}
+            style={{ left: clampedX, top: hoveredTabInfo.y + 6, transition: 'left 0.1s ease-out' }}
           >
             <div className="flex items-center gap-2">
               <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: agentColor(t.agentId) }} />

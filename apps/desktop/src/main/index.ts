@@ -65,6 +65,18 @@ import {
 } from './agent-utils.js';
 import { ensureFd } from './fd-install.js';
 import { ptys, shuttingDown, setShuttingDown, killAllPtys } from './pty-manager.js';
+import {
+  isComputerUseEnabled,
+  applyClaudeCodeMcp,
+  injectGeminiMcp,
+  injectOpencodeMcp,
+  codexMcpCliArgs,
+  injectPiMcp,
+  startCodexApiProxy,
+  writeComputerUseSkillFiles,
+  removeComputerUseSkillFiles,
+  COMPUTER_USE_SETTING_KEY,
+} from './computer-use.js';
 import { runNpmGlobal } from './npm-installer.js';
 import { setupPowerMonitor, registerPowerHandlers, stopCaffeinate } from './power-manager.js';
 import { createWindow, watchWindowShortcuts, installAppMenu, mainWindow } from './window.js';
@@ -246,6 +258,7 @@ function registerIpc(): void {
     let env: Record<string, string>;
     let launchCwd: string;
     let claudeSettingsRestore: (() => void) | null = null;
+    let computerUseCleanup: (() => void) | null = null;
 
     if (req.agentId === 'pi') {
       const launch = PiAdapter.buildLaunch({
@@ -262,6 +275,13 @@ function registerIpc(): void {
       // For cron jobs pass the prompt as a positional CLI arg (same pattern as other agents)
       if (req.isCronJob && req.initialPrompt?.trim()) {
         args = [...args, req.initialPrompt.trim()];
+      }
+      // Computer Use: inject bridge extension + env
+      if (isComputerUseEnabled(getAllSettings(), 'pi')) {
+        const { extensionPath, env: cuEnv, cleanup } = injectPiMcp();
+        Object.assign(env, cuEnv);
+        args = [...args, '--extension', extensionPath];
+        computerUseCleanup = cleanup;
       }
     } else {
       const piLike = PiAdapter.buildLaunch({
@@ -370,12 +390,28 @@ function registerIpc(): void {
         const globalSettingsPath = join(claudeDir, 'settings.json');
         // Per-session temp settings file — unique per tab, never collides.
         const sessionSettingsPath = join(claudeDir, `tday-session-${req.tabId}.json`);
+        // Separate MCP config file passed via --mcp-config (mcpServers in --settings is ignored by claude-code).
+        const mcpConfigPath = join(claudeDir, `tday-mcp-${req.tabId}.json`);
 
         try {
           mkdirSync(claudeDir, { recursive: true });
 
           // ── Layer 1: write per-session temp file ──────────────────────────
-          const sessionSettings = { env: envPatch };
+          const sessionSettings: Record<string, unknown> = { env: envPatch };
+          if (isComputerUseEnabled(getAllSettings(), 'claude-code')) {
+            // Only inject ANTHROPIC_BETA for real Anthropic backends; local
+            // OAI-compat servers (LM Studio, Ollama…) reject computer_use_20250124.
+            const isAnthropicBackend = cp.kind === 'anthropic';
+            applyClaudeCodeMcp(sessionSettings, isAnthropicBackend);
+            // MCP servers must be passed via --mcp-config (not --settings) for
+            // claude-code to register them before the session starts.
+            const mcpServers = sessionSettings.mcpServers;
+            delete sessionSettings.mcpServers;
+            if (mcpServers) {
+              writeFileSync(mcpConfigPath, JSON.stringify({ mcpServers }, null, 2), 'utf8');
+              args = ['--mcp-config', mcpConfigPath, ...args];
+            }
+          }
           writeFileSync(sessionSettingsPath, JSON.stringify(sessionSettings, null, 2), 'utf8');
           // Instruct claude-code to load this file (merged with global).
           args = ['--settings', sessionSettingsPath, ...args];
@@ -402,6 +438,7 @@ function registerIpc(): void {
         claudeSettingsRestore = () => {
           try {
             try { unlinkSync(sessionSettingsPath); } catch { /* ok */ }
+            try { unlinkSync(mcpConfigPath); } catch { /* ok */ }
             claudeSessionCount.n = Math.max(0, claudeSessionCount.n - 1);
             if (claudeSessionCount.n === 0) {
               // Last session done — restore global settings.json.
@@ -422,8 +459,74 @@ function registerIpc(): void {
         Object.assign(env, envPatch);
       }
 
+      // Computer Use for claude-code when no effectiveProvider is configured:
+      // The provider block above is skipped, but MCP injection must still happen.
+      if (req.agentId === 'claude-code' && !effectiveProvider && isComputerUseEnabled(getAllSettings(), 'claude-code')) {
+        const claudeDir = join(homedir(), '.claude');
+        const sessionSettingsPath = join(claudeDir, `tday-session-${req.tabId}.json`);
+        const mcpConfigPath = join(claudeDir, `tday-mcp-${req.tabId}.json`);
+        try {
+          mkdirSync(claudeDir, { recursive: true });
+          const sessionSettings: Record<string, unknown> = {};
+          // No effectiveProvider: default Anthropic backend.
+          applyClaudeCodeMcp(sessionSettings, true);
+          // MCP servers via --mcp-config; rest (permissions, env, customInstructions) via --settings.
+          const mcpServers = sessionSettings.mcpServers;
+          delete sessionSettings.mcpServers;
+          if (mcpServers) {
+            writeFileSync(mcpConfigPath, JSON.stringify({ mcpServers }, null, 2), 'utf8');
+            args = ['--mcp-config', mcpConfigPath, ...args];
+          }
+          writeFileSync(sessionSettingsPath, JSON.stringify(sessionSettings, null, 2), 'utf8');
+          args = ['--settings', sessionSettingsPath, ...args];
+          claudeSettingsRestore = () => {
+            try { unlinkSync(mcpConfigPath); } catch { /* ok */ }
+            try { unlinkSync(sessionSettingsPath); } catch { /* ok */ }
+          };
+        } catch (e) {
+          console.warn('[tday] could not set up claude-code Computer Use session settings:', e);
+        }
+      }
+
       if (req.agentId === 'deepseek-tui' && effectiveProvider) {
         Object.assign(env, deepseekTuiProviderEnv(effectiveProvider.kind, effectiveProvider.apiKey, effectiveProvider.baseUrl));
+      }
+
+      // ── Computer Use: inject MCP for agents with global config files ──────
+      if (isComputerUseEnabled(getAllSettings(), req.agentId)) {
+        if (req.agentId === 'gemini') {
+          computerUseCleanup = injectGeminiMcp();
+        } else if (req.agentId === 'opencode') {
+          computerUseCleanup = injectOpencodeMcp();
+        } else if (req.agentId === 'codex') {
+          // codex wraps MCP tools as type:"namespace" which third-party providers
+          // (DeepSeek, LM Studio, …) don't support.  When a base URL is configured
+          // we insert a local proxy that expands namespace tools → flat functions
+          // on the request path and converts flat function-call names back to the
+          // namespace+name split on the response path.
+          // Inject the MCP server via -c args (ephemeral, never touches ~/.codex/config.toml)
+          args.push(...codexMcpCliArgs());
+
+          const cuBaseUrl = gatewayResolution?.baseUrl ?? effectiveProvider?.baseUrl;
+          let proxyStop: (() => void) | undefined;
+          if (cuBaseUrl) {
+            try {
+              const proxy = await startCodexApiProxy(cuBaseUrl);
+              proxyStop = proxy.stop;
+              // Replace the base_url in the already-built args so codex hits the proxy.
+              for (let i = 0; i < args.length - 1; i++) {
+                if (args[i] === '-c' && (args[i + 1] as string).startsWith('model_providers.tday.base_url=')) {
+                  args[i + 1] = `model_providers.tday.base_url="${proxy.proxyBaseUrl}"`;
+                  break;
+                }
+              }
+            } catch (e) {
+              console.warn('[tday] could not start codex namespace-tool proxy:', e);
+            }
+          }
+          computerUseCleanup = () => { proxyStop?.(); };
+        }
+        // claude-code is handled above inside the per-session settings block
       }
 
       if (gatewayResolution?.noProxyHosts?.length) appendNoProxy(env, gatewayResolution.noProxyHosts);
@@ -537,6 +640,8 @@ function registerIpc(): void {
       if (ptys.get(req.tabId) === pty) ptys.delete(req.tabId);
       // Restore ~/.claude/settings.json to its pre-launch state.
       claudeSettingsRestore?.();
+      // Restore any computer-use MCP config that was injected for this session.
+      computerUseCleanup?.();
     });
 
     return { pid: pty.pid };
@@ -615,6 +720,11 @@ function registerIpc(): void {
   ipcMain.handle(IPC.settingsGetAll, () => getAllSettings());
   ipcMain.handle(IPC.settingsSet, (_e, key: string, value: unknown): void => {
     setSetting(key, value as JsonValue);
+    // Sync skill/instruction files immediately when the Computer Use toggle changes.
+    if (key === COMPUTER_USE_SETTING_KEY) {
+      if (value) writeComputerUseSkillFiles();
+      else removeComputerUseSkillFiles();
+    }
   });
 
   // Open external URL (https only)
@@ -710,7 +820,10 @@ app.whenReady().then(() => {
   // (before the window is visible) instead of the first settings open.
   void (async () => {
     // File caches (fast, synchronous internally, warm them eagerly)
-    getAllSettings();
+    const startupSettings = getAllSettings();
+    // Sync Computer Use skill files so agents have context even if the app
+    // was closed without toggling (e.g. after a crash or force-quit).
+    if (startupSettings[COMPUTER_USE_SETTING_KEY]) writeComputerUseSkillFiles();
     loadAgents();
     loadProviders();
     // Detect all agents in parallel using Promise.all with idle scheduling

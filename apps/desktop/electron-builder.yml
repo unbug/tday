@@ -18,11 +18,15 @@ extraResources:
       - "**/*.md"
   - from: resources/CoWorkers.md
     to: CoWorkers.md
+  - from: resources/pi-computer-use-bridge.ts
+    to: pi-computer-use-bridge.ts
 
 # ── macOS ──────────────────────────────────────────────────────────────────────
 mac:
   category: public.app-category.developer-tools
   icon: build/icon.icns
+  extendInfo:
+    NSLocalNetworkUsageDescription: "Tday needs local network access to connect to local AI models (e.g., LM Studio)."
   target:
     - target: dmg
       arch:
@@ -36,6 +40,10 @@ mac:
   hardenedRuntime: false
   gatekeeperAssess: false
   identity: null
+  # tday-devtools MCP binary (built by cargo before packaging)
+  extraResources:
+    - from: ../../crates/tday-devtools/target/release/tday-devtools
+      to: tday-devtools
 
 # ── Windows ────────────────────────────────────────────────────────────────────
 win:
@@ -47,6 +55,10 @@ win:
       arch:
         - x64
   artifactName: "Tday-${version}-win-${arch}.${ext}"
+  # tday-devtools MCP binary
+  extraResources:
+    - from: ../../crates/tday-devtools/target/release/tday-devtools.exe
+      to: tday-devtools.exe
 
 nsis:
   oneClick: false
@@ -60,6 +72,10 @@ nsis:
 # ── Linux ──────────────────────────────────────────────────────────────────────
 linux:
   category: Development
+  # tday-devtools MCP binary
+  extraResources:
+    - from: ../../crates/tday-devtools/target/release/tday-devtools
+      to: tday-devtools
   executableName: Tday
   target:
     - target: AppImage

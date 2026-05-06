@@ -8,6 +8,7 @@ import { UsageSection } from './Settings/UsageSection';
 import { HistorySection } from './Settings/HistorySection';
 import { CronSection } from './Settings/CronSection';
 import { CoWorkerSection } from './Settings/CoWorkerSection';
+import { ComputerUseSection } from './Settings/ComputerUseSection';
 import { describeCronExpr } from './Settings/cron-helpers';
 
 interface Props {
@@ -35,10 +36,11 @@ interface Props {
 const TABS: { id: Section; label: string }[] = [
   { id: 'usage',      label: 'Usage' },
   { id: 'providers',  label: 'Providers' },
-  { id: 'agents',     label: 'Agents' },
-  { id: 'cron',       label: 'CronJobs' },
-  { id: 'coworkers',  label: 'CoWorkers' },
-  { id: 'history',    label: 'History' },
+  { id: 'agents',        label: 'Agents' },
+  { id: 'cron',          label: 'CronJobs' },
+  { id: 'coworkers',     label: 'CoWorkers' },
+  { id: 'history',       label: 'History' },
+  { id: 'computer-use',  label: 'Experimental' },
 ];
 
 export function Settings({
@@ -238,7 +240,14 @@ export function Settings({
         <div className="relative z-10 flex shrink-0 items-end gap-0.5 border-b border-zinc-800/60 px-4 pb-0 pt-3">
           {TABS.map((t) => (
             <SectionTab key={t.id} active={section === t.id} onClick={() => changeSection(t.id)}>
-              {t.label}
+              {t.id === 'computer-use' ? (
+                <span className="flex items-center gap-1">
+                  {t.label}
+                  <span className="rounded bg-amber-500/25 px-1 text-[9px] font-semibold uppercase tracking-wider text-amber-400">
+                    exp
+                  </span>
+                </span>
+              ) : t.label}
             </SectionTab>
           ))}
           <div className="flex-1" />
@@ -305,6 +314,9 @@ export function Settings({
           )}
           {section === 'coworkers' && (
             <CoWorkerSection coworkers={coworkers} onCoworkersChange={setCoworkers} />
+          )}
+          {section === 'computer-use' && (
+            <ComputerUseSection />
           )}
         </div>
 

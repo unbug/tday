@@ -49,9 +49,37 @@ describe('contentBlocksFromContent', () => {
     expect(result.map((b) => b.text)).toEqual(['a', 'b', 'c']);
   });
 
-  it('skips parts without text', () => {
-    const result = contentBlocksFromContent([{ type: 'image', url: 'x' }]);
+  it('skips unrecognised parts without text or image_url', () => {
+    const result = contentBlocksFromContent([{ type: 'unknown', url: 'x' }]);
     expect(result).toEqual([]);
+  });
+
+  it('converts input_image with data: URI to Anthropic base64 image block', () => {
+    const result = contentBlocksFromContent([{
+      type: 'input_image',
+      image_url: { url: 'data:image/png;base64,abc123' },
+    }]);
+    expect(result).toEqual([{
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/png', data: 'abc123' },
+    }]);
+  });
+
+  it('converts input_image with https URL to Anthropic url image block', () => {
+    const result = contentBlocksFromContent([{
+      type: 'input_image',
+      image_url: { url: 'https://example.com/img.png' },
+    }]);
+    expect(result).toEqual([{
+      type: 'image',
+      source: { type: 'url', url: 'https://example.com/img.png' },
+    }]);
+  });
+
+  it('passes through already-Anthropic image blocks', () => {
+    const block = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'xyz' } };
+    const result = contentBlocksFromContent([block]);
+    expect(result).toEqual([block]);
   });
 
   it('unwraps object with text property', () => {

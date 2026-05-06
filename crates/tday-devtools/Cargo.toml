@@ -1,0 +1,119 @@
+[package]
+name = "tday-devtools"
+version = "0.1.0"
+edition = "2021"
+description = "tday DevTools MCP Server — screenshot, OCR, click, AX, find_image, CDP, Android, cross-platform"
+keywords    = ["mcp", "computer-use", "ui-automation", "android", "screenshot"]
+categories  = ["development-tools::testing", "accessibility"]
+
+[[bin]]
+name = "tday-devtools"
+path = "src/main.rs"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Features
+# ──────────────────────────────────────────────────────────────────────────────
+[features]
+default             = ["find_image_fast", "cdp"]
+# find_image NCC optimisations
+find_image_fast     = ["find_image_simd", "find_image_parallel"]
+find_image_simd     = ["dep:wide"]
+find_image_parallel = ["dep:rayon"]
+# Chrome DevTools Protocol (browser / Electron automation)
+cdp                 = ["dep:chromiumoxide"]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Core dependencies
+# ──────────────────────────────────────────────────────────────────────────────
+[dependencies]
+# MCP SDK (stdio transport)
+rmcp = { version = "0.2", features = ["server", "transport-io", "macros"] }
+
+# Async runtime
+tokio      = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+
+# Serialization
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Image encode / decode
+base64 = "0.22"
+image  = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
+# Temp files
+tempfile = "3"
+
+# HTTP client (scrape tool)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"] }
+
+# Logging
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+thiserror = "2"
+
+# WebSocket (app debug protocol + CDP)
+tokio-tungstenite = "0.24"
+futures-util      = "0.3"
+url               = "2.5"
+
+# Optional perf features for find_image
+rayon = { version = "1.10", optional = true }
+wide  = { version = "0.7",  optional = true }
+
+# Android ADB
+adb_client = "3"
+quick-xml  = "0.39"
+
+# CDP browser automation (optional, behind "cdp" feature)
+chromiumoxide = { version = "0.9", optional = true, default-features = false }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# macOS platform dependencies
+# ──────────────────────────────────────────────────────────────────────────────
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics   = "0.24"
+core-foundation = "0.10"
+cocoa           = "0.26"
+objc            = "0.2"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Windows platform dependencies
+# ──────────────────────────────────────────────────────────────────────────────
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+    "implement",
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Accessibility",
+    "Win32_System_Com",
+    "Win32_System_Threading",
+    "Win32_System_ProcessStatus",
+    "Win32_System_SystemServices",
+    "Graphics_Imaging",
+    "Media_Ocr",
+    "Storage_Streams",
+    "Foundation",
+    "Foundation_Collections",
+]}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Linux platform dependencies
+# ──────────────────────────────────────────────────────────────────────────────
+[target.'cfg(target_os = "linux")'.dependencies]
+x11 = { version = "2.3", features = ["xlib", "xtest", "xrandr"] }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Compiler lints
+# ──────────────────────────────────────────────────────────────────────────────
+[lints.rust]
+unexpected_cfgs = "allow"   # suppress cfg warnings from objc crate macros
+
+[dev-dependencies]
+tempfile = "3"

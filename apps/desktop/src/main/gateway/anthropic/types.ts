@@ -28,6 +28,8 @@ export interface ABlock {
   tool_use_id?: string;
   /** tool_result: content string or block array */
   content?: unknown;
+  /** image block source */
+  source?: { type: string; media_type?: string; data?: string; url?: string };
   cache_control?: unknown;
 }
 
