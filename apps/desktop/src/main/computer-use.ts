@@ -75,7 +75,7 @@ Need to interact with a specific element in a running app?
        probe_app → cdp_connect → cdp_find_elements / cdp_fill / cdp_click
 \`\`\`
 
-> ⚠️ **Never call \`take_screenshot\` as a first step.** Screenshots are slow, require
+> ⚠️ **Avoid calling \`take_screenshot\` as a first step.** Screenshots are slow, require
 > Screen Recording permission on macOS, and usually aren't needed — use \`find_text\`,
 > \`ax_find\`, or \`get_page_content\` instead.
 >
