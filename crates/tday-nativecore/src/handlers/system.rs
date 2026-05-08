@@ -147,7 +147,7 @@ pub fn clipboard_get_text() -> std::result::Result<String, String> {
             return Err(format!("Get-Clipboard failed: {stderr}"));
         }
         // PowerShell appends a trailing newline — strip it.
-        let text = String::from_utf8_lossy(&out.stdout).trim_end_matches('\n').trim_end_matches('\r').to_string();
+        let text = String::from_utf8_lossy(&out.stdout).trim_end().to_string();
         Ok(text)
     }
     #[cfg(target_os = "linux")]
@@ -215,7 +215,9 @@ pub fn clipboard_set_text(text: &str) -> std::result::Result<(), String> {
             .spawn();
         if let Ok(mut child) = xclip {
             if let Some(stdin) = child.stdin.as_mut() {
-                let _ = stdin.write_all(text.as_bytes());
+                if let Err(e) = stdin.write_all(text.as_bytes()) {
+                    tracing::warn!("[tday] clipboard: xclip write failed: {e}");
+                }
             }
             if child.wait().map(|s| s.success()).unwrap_or(false) {
                 return Ok(());
@@ -315,10 +317,12 @@ pub async fn handle_get_page_content(params: Value) -> Result<Value> {
         .map_err(|e| DevToolsError::Other(format!("spawn: {e}")))?
         .map_err(DevToolsError::Other)?;
 
-    // 5. Restore the original clipboard (best effort; ignored on failure).
+    // 5. Restore the original clipboard (best effort; log on failure).
     if restore {
         if let Some(orig) = original {
-            let _ = tokio::task::spawn_blocking(move || clipboard_set_text(&orig)).await;
+            if let Ok(Err(e)) = tokio::task::spawn_blocking(move || clipboard_set_text(&orig)).await {
+                tracing::warn!("[tday] get_page_content: could not restore clipboard: {e}");
+            }
         }
     }
 
