@@ -39,7 +39,7 @@ describe('histAgentLabel', () => {
 
 describe('histAgentColor', () => {
   it('returns known color for pi', () => {
-    expect(histAgentColor('pi')).toBe('#a78bfa');
+    expect(histAgentColor('pi')).toBe('#e879f9');
   });
 
   it('returns fallback grey for unknown agent', () => {

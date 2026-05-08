@@ -356,10 +356,13 @@ export function modelFlagsFor(
           ? model.replace(/^[^/]+\//, '')
           : model;
       // Always compose as "<opencode-provider-id>/<model-id>".
-      // Without this, models that already contain "/" (e.g. OpenRouter's
-      // "anthropic/claude-sonnet-4-5") would be passed without the provider
-      // prefix, causing opencode to look up the wrong provider.
-      const composed = `${opencodeProviderId(providerKind)}/${bareModel}`;
+      // Guard against double-prefix: if bareModel already starts with the
+      // expected provider prefix (e.g. "anthropic/claude-3-5-sonnet"), pass
+      // it through unchanged to avoid "anthropic/anthropic/claude-3-5-sonnet".
+      const expectedPrefix = `${opencodeProviderId(providerKind)}/`;
+      const composed = bareModel.startsWith(expectedPrefix)
+        ? bareModel
+        : `${expectedPrefix}${bareModel}`;
       return ['--model', composed];
     }
     case 'gemini':

@@ -59,16 +59,17 @@ export function convertTools(tools: unknown): ATool[] | undefined {
         break;
 
       case 'namespace': {
-        // Expand child functions with a `<namespace><name>` qualified name.
-        // Namespace already ends with `__` (e.g. "mcp__server__"), so we
-        // concatenate directly rather than inserting an extra separator.
+        // Expand child functions with a `<namespace>_<name>` qualified name.
+        // If the namespace already ends with `__` (MCP convention), concatenate
+        // directly; otherwise insert `_` as separator.
         const children = Array.isArray(t.tools) ? (t.tools as Obj[]) : [];
         const ns = typeof t.name === 'string' ? t.name : '';
         for (const child of children) {
           if (typeof child.type !== 'string' || child.type !== 'function') continue;
           const cName = typeof child.name === 'string' ? child.name : '';
           if (!cName) continue;
-          const qualName = ns ? `${ns}${cName}` : cName;
+          const sep = ns.endsWith('__') ? '' : (ns ? '_' : '');
+          const qualName = ns ? `${ns}${sep}${cName}` : cName;
           const schema: Obj =
             child.parameters && typeof child.parameters === 'object' && !Array.isArray(child.parameters)
               ? { ...(child.parameters as Obj), type: 'object' }

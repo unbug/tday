@@ -122,9 +122,10 @@ describe('isComputerUseEnabled', () => {
 
   it('returns false for unsupported agents even when globally enabled', () => {
     const s = { [COMPUTER_USE_SETTING_KEY]: true };
-    expect(isComputerUseEnabled(s, 'pi')).toBe(false);
+    // 'pi' is now a supported Computer Use agent; only non-listed agents should return false
     expect(isComputerUseEnabled(s, 'terminal')).toBe(false);
     expect(isComputerUseEnabled(s, 'crush')).toBe(false);
+    expect(isComputerUseEnabled(s, 'hermes')).toBe(false);
   });
 });
 

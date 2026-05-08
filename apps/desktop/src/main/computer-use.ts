@@ -329,7 +329,8 @@ export interface OpencodeMcpEntry {
 /** Returns the absolute path to the bundled `tday-nativecore` binary. */
 function devToolsBinaryPath(): string {
   const exe = process.platform === 'win32' ? 'tday-nativecore.exe' : 'tday-nativecore';
-  if (app.isPackaged) {
+  // `app` may be undefined when running in a Node.js test environment (vitest).
+  if (typeof app !== 'undefined' && app?.isPackaged) {
     return join(process.resourcesPath, exe);
   }
   // Dev: cargo build output relative to the monorepo root
