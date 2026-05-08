@@ -39,47 +39,77 @@ export const COMPUTER_USE_AGENTS: AgentId[] = ['claude-code', 'gemini', 'opencod
  */
 export const COMPUTER_USE_SKILL = `\
 You have computer use capabilities via the \`${MCP_SERVER_KEY}\` MCP server.
-These tools let you control the macOS desktop, browsers, and Android devices.
+These tools let you control the desktop, browsers, and Android devices on macOS, Windows, and Linux.
 
 ## Decision tree — pick the right approach first
 
 \`\`\`
-User request involves the desktop / a running app?
-  ├─ 1st choice — AX (most reliable; no Screen Recording needed; survives window moves):
-  │    take_ax_snapshot → ax_click / ax_set_value / ax_select / ax_perform_action
-  │    Works for: all native macOS apps, most Electron apps (non-web-content areas)
+Need to READ all text from a document/page/terminal?
+  └─ get_page_content   ← fastest: Select-All + Copy, zero permissions, any app
+
+Need to CLICK a labelled button/link/item?
+  └─ click_text {text}  ← single call, finds + clicks in one step (AX → OCR fallback)
+
+Need to TYPE into a text field?
+  ├─ If the field is already focused:
+  │    ax_focused → ax_set_value {uid, value}      ← cheapest: no tree walk
+  ├─ If you know the label of the field:
+  │    ax_find {text: "label", role: "textfield"}  ← targeted search, no full dump
+  │    → ax_set_value / ax_click on returned uid
+  └─ Fallback: type_text {text, x, y, clear: true}
+
+Need to interact with a specific element in a running app?
+  ├─ 1st — ax_find {text?, role?}   ← targeted AX search; far smaller than full snapshot
+  │         Returns only matching elements with UIDs ready for ax_click / ax_set_value
   │
-  ├─ 2nd choice — Visual + Mouse/Keyboard (universal fallback):
-  │    take_screenshot → find_text / ocr_screenshot → click / type_text / shortcut / scroll / drag
-  │    Use when: AX returns empty tree, element has no UID, or the UI is canvas/game/image-based
+  ├─ 2nd — ax_focused               ← if element is already focused; 1-node response
   │
-  └─ LAST RESORT — CDP (only Chrome/Electron web content, and only if AX+Visual both fail):
+  ├─ 3rd — take_ax_snapshot         ← full tree; only when you need to explore unknown UI
+  │         Then: ax_click / ax_set_value / ax_select / ax_perform_action
+  │
+  ├─ 4th — Visual + Mouse/Keyboard (universal fallback when AX gives empty tree):
+  │         find_text → click / type_text / shortcut / scroll / drag
+  │         Use when: AX unsupported, canvas/game/image-based UI
+  │
+  └─ LAST RESORT — CDP (only Chrome/Electron web content, AX+Visual both failed):
        probe_app → cdp_connect → cdp_find_elements / cdp_fill / cdp_click
-       Use when: form fields or buttons are inside a web page and can't be found by find_text
 \`\`\`
 
-> **Always try AX first** — it is pixel-perfect, doesn't need Screen Recording permission,
-> and survives window moves/resizes. Drop to Visual when AX has no coverage.
-> CDP is powerful but brittle (port changes, page reloads, CSP) — use it only as a last resort.
+> ⚠️ **Avoid calling \`take_screenshot\` as a first step.** Screenshots are slow, require
+> Screen Recording permission on macOS, and usually aren't needed — use \`find_text\`,
+> \`ax_find\`, or \`get_page_content\` instead.
+>
+> ⚠️ **Prefer \`ax_find\` over \`take_ax_snapshot\`** when you know what you're looking for.
+> \`take_ax_snapshot\` returns up to 10,000 nodes; \`ax_find\` returns only the matching ones.
 
 ## Core tools reference
 
-### Screen & Vision
+### Text reading (no screenshot needed)
 | Tool | When to use |
 |------|-------------|
-| \`take_screenshot\` | **Last resort visual fallback** — only when AX and find_text give no useful result (canvas, game, PDF, fully custom-drawn UI). Avoid calling it as a routine step. |
-| \`find_text\` | **Preferred** for locating on-screen text — uses AX tree first, OCR fallback. Returns \`{x,y}\` without a full screenshot. |
-| \`find_image\` | Match a template sub-image to locate icons/buttons visually |
-| \`element_at_point\` | Identify the AX element at given screen coords |
+| \`get_page_content\` | **Fastest text extraction** — Select-All+Copy. Read entire document, terminal, browser page. No permissions needed. Works on all platforms. |
+| \`find_text\` | Locate specific text on screen by AX tree search (OCR fallback). Returns \`{x,y,bounds}\` without screenshot. |
+
+### Accessibility (AX) — preferred for all native and Electron apps
+| Tool | Cost | When to use |
+|------|------|-------------|
+| \`ax_focused\` | **Cheapest** (1 element) | Interact with currently focused element — active text field, button, etc. |
+| \`ax_find\` | **Targeted** (matching elements only) | Find specific buttons/fields/items by text or role. Much smaller than full snapshot. |
+| \`take_ax_snapshot\` | **Full tree** (up to 10k nodes) | Explore unknown UI structure when you don't know what's there |
+| \`ax_click\` | — | Click element by uid from ax_find / ax_focused / snapshot |
+| \`ax_set_value\` | — | Type into text field by uid (no coordinates needed) |
+| \`ax_select\` | — | Select/open menu item, tab, or list row by uid |
+| \`ax_perform_action\` | — | Run any AX action: \`"AXPress"\`, \`"AXIncrement"\`, \`"AXShowMenu"\`, etc. |
 
 ### Mouse & Keyboard
 | Tool | Notes |
 |------|-------|
-| \`click\` | \`button\`: left/right/middle. \`click_count: 2\` = double-click |
-| \`type_text\` | Set \`x,y\` to click-to-focus first. Set \`clear: true\` to replace existing text. \`press_enter: true\` to submit |
-| \`shortcut\` | e.g. \`"command+c"\`, \`"ctrl+shift+s"\`, \`"return"\` — always prefer this over press_key for multi-key combos |
-| \`scroll\` | Use \`direction\` + \`wheel_times\` (preferred) rather than raw \`delta_x/delta_y\` |
-| \`drag\` | Drag-and-drop, slider adjustment, reordering list items |
+| \`click_text\` | **Find + click in one call** — no need to extract coordinates. AX → OCR fallback. |
+| \`click\` | Click at \`(x,y)\`. \`button\`: left/right/middle. \`click_count: 2\` = double-click |
+| \`type_text\` | Set \`x,y\` to click-to-focus first. \`clear: true\` replaces existing text. \`press_enter: true\` submits. |
+| \`shortcut\` | e.g. \`"command+c"\`, \`"ctrl+shift+s"\`, \`"return"\` — always prefer this over press_key for combos |
+| \`scroll\` | Use \`direction\` + \`wheel_times\` (preferred) over raw \`delta_x/delta_y\` |
+| \`drag\` | Drag-and-drop, slider adjustment, list reordering |
 
 ### App management
 | Tool | Notes |
@@ -90,19 +120,17 @@ User request involves the desktop / a running app?
 | \`resize_window\` | Position/size a window by app name |
 | \`quit_app\` | \`force: true\` = SIGKILL equivalent |
 
-### macOS Accessibility (AX) — preferred for native apps
-| Tool | Notes |
-|------|-------|
-| \`take_ax_snapshot\` | Returns a tree of \`{uid, role, name, value, children}\` nodes |
-| \`ax_click\` | Click by uid from the snapshot — pixel-perfect, survives window moves |
-| \`ax_set_value\` | Type into text fields without needing coordinates |
-| \`ax_select\` | Select/open menu items, tabs, list rows |
-| \`ax_perform_action\` | Run any AX action (\`"AXPress"\`, \`"AXIncrement"\`, etc.) |
+### Screen & Vision (use only as fallback)
+| Tool | When to use |
+|------|-------------|
+| \`take_screenshot\` | **Last resort** — only when AX gives empty tree AND find_text fails (canvas, game, PDF, fully custom-drawn UI). Never use as a routine first step. |
+| \`find_image\` | Match a template sub-image to locate icons/buttons visually |
+| \`element_at_point\` | Identify the AX element at given screen coords |
 
-### CDP — Chrome/Electron apps
+### CDP — Chrome/Electron apps (last resort)
 | Tool | Notes |
 |------|-------|
-| \`probe_app\` | Returns \`{kind: "Electron"\|"Chrome"\|"Native"}\` and debug port. Run this first |
+| \`probe_app\` | Returns \`{kind: "Electron"|"Chrome"|"Native"}\` and debug port. Run this first |
 | \`cdp_connect\` | Connect to the debug port returned by probe_app |
 | \`cdp_find_elements\` | CSS selector / text search. Returns \`[{id, tag, text, rect}]\` |
 | \`cdp_click\` | Click element by id. More reliable than pixel coords in web UIs |
@@ -113,27 +141,54 @@ User request involves the desktop / a running app?
 | Tool | Notes |
 |------|-------|
 | \`execute_command\` | Run shell commands (\`mode: "shell"\`) or AppleScript (\`mode: "osascript"\`) |
-| \`clipboard\` | \`mode: "get"\` to read, \`mode: "set"\` to write clipboard text |
-| \`process\` | List/kill processes. Useful to check if an app is already running |
+| \`clipboard\` | \`mode: "get"\` / \`mode: "set"\` — read or write clipboard text (macOS, Windows, Linux) |
+| \`process\` | List/kill processes |
 | \`filesystem\` | Read, write, list, search files — use instead of shell when the path is known |
 | \`scrape\` | Fetch a URL and return its body as text |
 | \`wait\` | Pause between actions. Use after launching apps or triggering animations (\`duration: 0.5\`–\`2\`) |
 
 ### Android (requires connected device via ADB)
-Use \`android_list_devices\` first to confirm a device is connected, then \`android_connect\`.
-Tools mirror the macOS set: \`android_screenshot\`, \`android_click\`, \`android_type_text\`, \`android_find_text\`, \`android_launch_app\`.
+Use \`android_list_devices\` first, then \`android_connect\`.
+Tools: \`android_screenshot\`, \`android_click\`, \`android_type_text\`, \`android_find_text\`, \`android_launch_app\`.
 
 ## Common task patterns
 
+**Read full content of current document/page**
+\`\`\`
+get_page_content {}
+// → { text: "...all text...", length: N }
+// Fastest: Select-All + Copy. No screenshot, no OCR, no AX traversal.
+\`\`\`
+
+**Click a button or link by its label (simplest)**
+\`\`\`
+click_text {text: "Submit"}          // find + click in one call
+click_text {text: "OK", button: "left", click_count: 1}
+\`\`\`
+
+**Type into the currently focused text field**
+\`\`\`
+ax_focused {}
+// → { focused: { uid: "a0g3", role: "AXTextField", ... } }
+ax_set_value { uid: "a0g3", value: "hello world" }
+\`\`\`
+
+**Find and fill a specific text field**
+\`\`\`
+ax_find { text: "Search", role: "textfield" }
+// → { elements: [{ uid: "a5g3", role: "AXTextField", label: "Search" }], ... }
+ax_set_value { uid: "a5g3", value: "my query" }
+\`\`\`
+
 **Open an app and interact with it**
 \`\`\`
-1. list_apps                          // check if already running
-2. launch_app {app_name}              // if not running
-3. wait {duration: 1}                 // let the window appear
-4. take_ax_snapshot {app_name}        // preferred: structured, no screen recording needed
-   OR probe_app → cdp_connect         // for Chrome/Electron web content
-5. interact via ax_click / ax_set_value / cdp_fill
-6. verify cheaply: find_text or check AX value — NOT a full screenshot
+1. list_apps                               // check if already running
+2. launch_app {app_name}                   // if not running
+3. wait {duration: 1}                      // let the window appear
+4. ax_find {role: "button", text: "Login"} // targeted search — NOT full snapshot
+   OR click_text {text: "Login"}           // even simpler
+5. ax_click {uid}  OR  click_text          // interact
+6. verify cheaply: find_text {text: "..."} // NOT a full screenshot
 \`\`\`
 
 **Fill a web form in Chrome/Electron**
@@ -143,40 +198,25 @@ Tools mirror the macOS set: \`android_screenshot\`, \`android_click\`, \`android
 3. cdp_find_elements {selector/text}  // locate input fields
 4. cdp_fill {id, value}               // fill each field
 5. cdp_click {submit button id}       // submit
-6. take_screenshot                    // verify
-\`\`\`
-
-**Click something you can see on screen**
-\`\`\`
-1. find_text {text}                   // get {x,y} directly — no screenshot needed
-   OR take_ax_snapshot → ax_click     // even better: uid-based, survives window moves
-2. click {x, y}
-3. verify: find_text or check AX value (avoid a full screenshot if possible)
-\`\`\`
-
-**Type into a text field**
-\`\`\`
-// Visual approach:
-type_text {text, x, y, clear: true}
-
-// AX approach (more reliable for native apps):
-take_ax_snapshot → find the TextField uid → ax_set_value {uid, value}
+6. find_text {text: "success"}        // verify — avoid screenshot
 \`\`\`
 
 **Keyboard shortcut / menu action**
 \`\`\`
-shortcut {shortcut: "command+s"}          // Save
+shortcut {shortcut: "command+s"}          // Save (macOS)
+shortcut {shortcut: "ctrl+s"}             // Save (Windows/Linux)
 shortcut {shortcut: "command+shift+p"}    // VS Code command palette
-shortcut {shortcut: "ctrl+a"}             // Select all (Linux/Windows apps)
 \`\`\`
 
 ## Reliability rules
-- **Start with AX, not screenshots** — \`take_ax_snapshot\` and \`find_text\` work without Screen Recording permission and are faster. Use \`take_screenshot\` only when the UI is non-standard (canvas, game, PDF, custom-drawn).
-- **Verify cheaply after actions** — check with \`find_text\` or an AX value query first. Only escalate to \`take_screenshot\` if the cheap check is insufficient.
-- **Prefer AX/CDP over pixel clicks** — coordinates break if the window moves; uid-based AX clicks do not.
+- **\`get_page_content\` to read text** — fastest, zero permissions, works in any app.
+- **\`click_text\` to click by label** — single call, no need to look up coordinates first.
+- **\`ax_focused\` or \`ax_find\` before \`take_ax_snapshot\`** — always try the targeted query first; only fall back to a full snapshot when you need to explore unknown UI.
+- **Never screenshot as first step** — use \`find_text\`, \`ax_find\`, or \`get_page_content\` first.
+- **Verify cheaply** — check with \`find_text\` or an AX value query. Only escalate to screenshot if needed.
+- **Prefer uid-based AX actions over pixel clicks** — AX uids survive window moves; coordinates don't.
 - **Use \`wait\`** after launching apps, opening dialogs, or triggering animations before the next action.
-- **Use \`find_text\` or \`take_ax_snapshot\`** rather than hardcoding coordinates from memory.
-- **If \`take_screenshot\` returns a black/blank image**: macOS Screen Recording permission is missing. Direct the user to: System Settings → Privacy & Security → Screen Recording → enable the terminal app.
+- **If \`take_screenshot\` returns black/blank**: Screen Recording permission is missing. Direct the user to: System Settings → Privacy & Security → Screen Recording.
 `.trim();
 
 

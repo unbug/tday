@@ -79,10 +79,11 @@ impl ServerHandler for DevToolsServer {
                 version: env!("CARGO_PKG_VERSION").to_string(),
             },
             instructions: Some(
-                "Native desktop automation MCP server for macOS.\n\
+                "Native desktop automation MCP server for macOS, Windows, and Linux.\n\
                  take_screenshot -> find_text/find_image to locate elements.\n\
                  click/type_text for coordinate input.\n\
-                 take_ax_snapshot + ax_click/ax_set_value for element-precise automation.\n"
+                 take_ax_snapshot + ax_click/ax_set_value for element-precise automation.\n\
+                 get_page_content: fastest way to read all text from a focused window (Select-All + Copy).\n"
                 .into(),
             ),
         }
@@ -191,6 +192,7 @@ async fn dispatch(
         "press_key"        => handlers::handle_press_key(params).await,
         "shortcut"         => handlers::handle_shortcut(params).await,
         "get_cursor_position" => handlers::handle_get_cursor_position(params).await,
+        "click_text"          => handlers::handle_click_text(params).await,
 
         // ── Navigation
         "list_windows"     => handlers::handle_list_windows(params).await,
@@ -209,6 +211,8 @@ async fn dispatch(
         "ax_set_value"        => handlers::handle_ax_set_value(params, ax).await,
         "ax_select"           => handlers::handle_ax_select(params, ax).await,
         "ax_perform_action"   => handlers::handle_ax_perform_action(params, ax).await,
+        "ax_find"             => handlers::handle_ax_find(params, ax).await,
+        "ax_focused"          => handlers::handle_ax_focused(params, ax).await,
 
         // ── Probe
         "probe_app" => {
@@ -223,6 +227,7 @@ async fn dispatch(
         "scrape"          => handlers::handle_scrape(params).await,
         "execute_command" => handlers::handle_execute_command(params).await,
         "clipboard"       => handlers::handle_clipboard(params).await,
+        "get_page_content" => handlers::handle_get_page_content(params).await,
         "sys_process"     => handlers::handle_process(params).await,
         "filesystem"      => handlers::handle_filesystem(params).await,
 
@@ -638,6 +643,20 @@ fn tool_list() -> Vec<Tool> {
                 }
             })),
         t("get_cursor_position", "Return the current cursor (x, y)", json!({ "type": "object", "properties": {} })),
+        t("click_text",
+            "Find text on screen via AX tree (or OCR fallback) and click it in a single call. \
+             Combines find_text + click — no need to extract x/y coordinates manually. \
+             This is the fastest way to click something you can describe by its label.",
+            json!({
+                "type": "object",
+                "required": ["text"],
+                "properties": {
+                    "text":        { "type": "string", "description": "Text to find and click" },
+                    "button":      { "type": "string", "enum": ["left","right","middle"], "default": "left" },
+                    "click_count": { "type": "integer", "default": 1, "description": "1 = single click, 2 = double-click" },
+                    "use_ax":      { "type": "boolean", "default": true, "description": "Try AX tree first (faster); falls back to OCR" }
+                }
+            })),
 
         // ── Navigation
         t("list_windows", "List all on-screen windows", json!({ "type": "object", "properties": {} })),
@@ -741,6 +760,29 @@ fn tool_list() -> Vec<Tool> {
                     "action": { "type": "string" }
                 }
             })),
+        t("ax_find",
+            "Search the AX/UIA tree for elements matching text and/or role WITHOUT dumping the full tree. \
+             Returns only matching elements (no children) — far smaller than take_ax_snapshot. \
+             Each result has a 'uid' registered in the session for immediate use with ax_click / ax_set_value. \
+             Use this instead of take_ax_snapshot when you only need specific elements.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "text":        { "type": "string",  "description": "Substring to match in label / value / description (case-insensitive)" },
+                    "role":        { "type": "string",  "description": "Role substring filter, e.g. 'button', 'textfield', 'checkbox'" },
+                    "app_name":    { "type": "string",  "description": "Target app name (default: frontmost)" },
+                    "pid":         { "type": "integer", "description": "Target process id (overrides app_name)" },
+                    "max_results": { "type": "integer", "default": 20, "description": "Maximum elements to return" }
+                }
+            })),
+        t("ax_focused",
+            "Return the currently focused AX element as a single slim node — the cheapest possible AX query. \
+             The returned uid is registered in the session for immediate use with ax_set_value / ax_perform_action. \
+             Use this to interact with whatever the user currently has focused (e.g., active text field).",
+            json!({
+                "type": "object",
+                "properties": {}
+            })),
 
         // ── Probe
         t("probe_app", "Probe an application to determine its kind (Native, Electron, Chrome)",
@@ -777,13 +819,33 @@ fn tool_list() -> Vec<Tool> {
                     "timeout": { "type": "integer", "default": 10, "description": "Seconds before killing the process (max 60)" }
                 }
             })),
-        t("clipboard", "Get or set the macOS clipboard text content",
+        t("clipboard", "Get or set the system clipboard text (macOS, Windows, Linux)",
             json!({
                 "type": "object",
                 "required": ["mode"],
                 "properties": {
                     "mode": { "type": "string", "enum": ["get","set"] },
                     "text": { "type": "string", "description": "Required for mode=set" }
+                }
+            })),
+        t("get_page_content",
+            "Read full text content of the currently focused window by simulating Select-All → Copy and reading the clipboard. \
+             Fastest way to obtain large bodies of text — no screenshot, no OCR, no AX tree traversal. \
+             Works on macOS (Cmd+A/C), Windows and Linux (Ctrl+A/C). \
+             Optionally restores the original clipboard after reading.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "restore_clipboard": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Restore the original clipboard content after reading (default true)"
+                    },
+                    "wait_ms": {
+                        "type": "integer",
+                        "default": 200,
+                        "description": "Milliseconds to wait after Copy before reading the clipboard (increase for slow apps, max 10000)"
+                    }
                 }
             })),
         t("sys_process", "List or kill OS processes",

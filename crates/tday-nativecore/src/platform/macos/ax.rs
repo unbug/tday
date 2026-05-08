@@ -266,6 +266,149 @@ unsafe fn snapshot_element(
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Public: ax_find_elements — targeted search (much smaller than full snapshot)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Walk the AX tree for `pid` and return elements that match `text_query`
+/// (AXTitle / AXValue / AXDescription, case-insensitive) and/or `role_filter`
+/// (exact AXRole string, case-insensitive).  Only matching leaf-info nodes are
+/// returned — **children are not included** — so the result is far smaller than
+/// `take_snapshot`.  Each returned node has a fresh UID registered in `refs`.
+pub fn ax_find_elements(
+    pid: i32,
+    text_query: Option<&str>,
+    role_filter: Option<&str>,
+    max_results: usize,
+    generation: u64,
+) -> Result<(Vec<AXNode>, HashMap<u32, AXRef>), String> {
+    let app = unsafe { AXUIElementCreateApplication(pid) };
+    if app.is_null() {
+        return Err(format!("AXUIElementCreateApplication failed for pid {pid}"));
+    }
+
+    let text_lower = text_query.map(|s| s.to_lowercase());
+    let role_lower = role_filter.map(|s| s.to_lowercase());
+    let mut nodes: Vec<AXNode> = Vec::new();
+    let mut refs:  HashMap<u32, AXRef> = HashMap::new();
+    let mut uid_counter: u32 = 0;
+    let mut walk_count: usize = 0;
+
+    unsafe {
+        walk_tree(app, &mut walk_count, 0, &mut |el| {
+            if nodes.len() >= max_results { return; }
+
+            let role = get_string(el, "AXRole").unwrap_or_else(|| "unknown".into());
+
+            // Role filter
+            if let Some(rf) = &role_lower {
+                if !role.to_lowercase().contains(rf.as_str()) { return; }
+            }
+
+            // Text filter
+            if let Some(tq) = &text_lower {
+                let hit = ["AXTitle", "AXValue", "AXDescription"]
+                    .iter()
+                    .any(|a| get_string(el, a).map_or(false, |s| s.to_lowercase().contains(tq.as_str())));
+                if !hit { return; }
+            } else if role_lower.is_none() {
+                // Neither filter set — match everything (dangerous for large apps)
+                // Limit to interactive roles only
+                let interactive = matches!(
+                    role.as_str(),
+                    "AXButton" | "AXTextField" | "AXTextArea" | "AXCheckBox"
+                    | "AXRadioButton" | "AXComboBox" | "AXPopUpButton" | "AXSlider"
+                    | "AXLink" | "AXMenuItem" | "AXTab" | "AXStaticText"
+                );
+                if !interactive { return; }
+            }
+
+            let uid_n = uid_counter;
+            uid_counter += 1;
+            let uid = format!("a{uid_n}g{generation}");
+
+            let ax_ref = AXRef::from_get(el);
+            refs.insert(uid_n, ax_ref);
+
+            let label  = get_string(el, "AXTitle").or_else(|| get_string(el, "AXDescription"));
+            let value  = get_string(el, "AXValue");
+            let bounds = element_bbox(el);
+            let enabled = get_bool(el, "AXEnabled");
+            let focused = get_bool(el, "AXFocused");
+
+            nodes.push(AXNode {
+                uid,
+                role,
+                label,
+                value,
+                description: None,
+                bounds,
+                enabled,
+                focused,
+                children: vec![], // no children — keeps response slim
+            });
+        });
+        core_foundation::base::CFRelease(app as _);
+    }
+
+    Ok((nodes, refs))
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Public: ax_get_focused — get the currently focused element
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Return a single slim AXNode for the system-wide focused element and register
+/// it in the returned refs map.  Returns `None` when nothing is focused.
+///
+/// This is the cheapest possible AX query — no tree walk at all.
+pub fn ax_get_focused(
+    generation: u64,
+) -> Result<Option<(AXNode, HashMap<u32, AXRef>)>, String> {
+    let system_wide = unsafe { AXUIElementCreateSystemWide() };
+    if system_wide.is_null() {
+        return Err("AXUIElementCreateSystemWide failed".into());
+    }
+
+    let attr = CFString::new("AXFocusedUIElement");
+    let mut val: core_foundation::base::CFTypeRef = ptr::null();
+    let ret = unsafe { AXUIElementCopyAttributeValue(system_wide, attr.as_concrete_TypeRef(), &mut val) };
+    unsafe { core_foundation::base::CFRelease(system_wide as _); }
+
+    if ret != K_AX_ERROR_OK || val.is_null() {
+        return Ok(None);
+    }
+
+    let el = val as AXUIElementRef;
+    // `val` is a +1 create rule result (CopyAttributeValue = create rule)
+    let ax_ref = unsafe { AXRef::from_create(el) };
+    let raw = ax_ref.as_raw();
+
+    let role   = unsafe { get_string(raw, "AXRole") }.unwrap_or_else(|| "unknown".into());
+    let label  = unsafe { get_string(raw, "AXTitle") }.or_else(|| unsafe { get_string(raw, "AXDescription") });
+    let value  = unsafe { get_string(raw, "AXValue") };
+    let bounds = unsafe { element_bbox(raw) };
+    let enabled = unsafe { get_bool(raw, "AXEnabled") };
+    let focused = Some(true);
+
+    let mut refs: HashMap<u32, AXRef> = HashMap::new();
+    refs.insert(0, ax_ref);
+
+    let node = AXNode {
+        uid: format!("a0g{generation}"),
+        role,
+        label,
+        value,
+        description: None,
+        bounds,
+        enabled,
+        focused,
+        children: vec![],
+    };
+
+    Ok(Some((node, refs)))
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Public: dispatch actions on retained AXRef
 // ──────────────────────────────────────────────────────────────────────────────
 

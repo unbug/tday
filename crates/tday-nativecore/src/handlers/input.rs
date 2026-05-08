@@ -6,6 +6,7 @@
 
 use crate::error::{DevToolsError, Result};
 use crate::platform;
+use crate::handlers::system::select_all_modifier;
 use serde_json::{json, Value};
 use std::time::Duration;
 
@@ -115,21 +116,30 @@ pub async fn handle_type_text(params: Value) -> Result<Value> {
             platform::click(cx, cy, platform::MouseButton::Left, 1)?;
             std::thread::sleep(Duration::from_millis(100));
         }
-        // 2. Clear field content (Cmd+A then Delete)
+        // 2. Clear field content (select-all then Delete).
+        //    Use Cmd+A on macOS, Ctrl+A on Windows/Linux.
         if clear {
-            platform::press_key("a", &["command".to_string()])?;
+            platform::press_key("a", &[select_all_modifier().to_string()])?;
             std::thread::sleep(Duration::from_millis(50));
             platform::press_key("delete", &[])?;
             std::thread::sleep(Duration::from_millis(50));
         }
-        // 3. Place caret
+        // 3. Place caret using platform-appropriate keys.
+        //    macOS:         Cmd+Left = line-start,  Cmd+Right = line-end
+        //    Windows/Linux: Home = line-start,       End = line-end
         match caret.as_str() {
             "start" => {
+                #[cfg(target_os = "macos")]
                 platform::press_key("left", &["command".to_string()])?;
+                #[cfg(not(target_os = "macos"))]
+                platform::press_key("home", &[])?;
                 std::thread::sleep(Duration::from_millis(20));
             }
             "end" => {
+                #[cfg(target_os = "macos")]
                 platform::press_key("right", &["command".to_string()])?;
+                #[cfg(not(target_os = "macos"))]
+                platform::press_key("end", &[])?;
                 std::thread::sleep(Duration::from_millis(20));
             }
             _ => {} // "idle" — leave caret where it is
@@ -189,6 +199,45 @@ pub async fn handle_get_cursor_position(_params: Value) -> Result<Value> {
         .await.map_err(|e| DevToolsError::Other(format!("task: {e}")))?
         .map_err(DevToolsError::Input)?;
     Ok(json!({ "x": x, "y": y }))
+}
+
+/// Find text on screen (via AX then OCR fallback) and click the centre of the
+/// first match in a single tool call.
+///
+/// Parameters:
+///   text        – the string to find and click (required)
+///   button      – "left" | "right" | "middle" (default "left")
+///   click_count – 1 | 2 (default 1; 2 = double-click)
+///   app_name    – limit search to this app's window (optional)
+///   use_ax      – prefer AX tree search (default true)
+pub async fn handle_click_text(params: Value) -> Result<Value> {
+    let text = params.get("text").and_then(|v| v.as_str())
+        .ok_or_else(|| DevToolsError::Input("text required".into()))?.to_string();
+    let btn_str = params.get("button").and_then(|v| v.as_str()).unwrap_or("left").to_string();
+    let count   = params.get("click_count").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
+    let use_ax  = params.get("use_ax").and_then(|v| v.as_bool()).unwrap_or(true);
+
+    let btn = parse_button(&btn_str)?;
+
+    let matches = tokio::task::spawn_blocking(move || -> std::result::Result<Vec<crate::platform::types::TextMatch>, String> {
+        if use_ax {
+            let res = platform::ax_find_text(&text, None).unwrap_or_default();
+            if !res.is_empty() { return Ok(res); }
+        }
+        // OCR fallback
+        platform::find_text_ocr(&text, None, true)
+    }).await.map_err(|e| DevToolsError::Other(format!("task: {e}")))?
+        .map_err(DevToolsError::Input)?;
+
+    let first = matches.into_iter().next()
+        .ok_or_else(|| DevToolsError::Input("text not found on screen".into()))?;
+
+    let (x, y) = (first.x, first.y);
+    tokio::task::spawn_blocking(move || platform::click(x, y, btn, count))
+        .await.map_err(|e| DevToolsError::Other(format!("task: {e}")))?
+        .map_err(DevToolsError::Input)?;
+
+    Ok(json!({ "ok": true, "x": x, "y": y, "matched": first.text }))
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
