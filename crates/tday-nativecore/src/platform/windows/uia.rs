@@ -335,6 +335,194 @@ pub fn ax_find_text(search: &str, _window_id: Option<u32>) -> Result<Vec<TextMat
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// ax_find_elements — targeted search (much smaller than full snapshot)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Walk the foreground window's UIA tree and return elements matching
+/// `text_query` (name/value/help, case-insensitive) and/or `role_filter`.
+/// Only matching nodes are returned (no children), each with a UID registered
+/// in `refs` for subsequent ax_click / ax_set_value calls.
+pub fn ax_find_elements(
+    pid: i32,
+    text_query: Option<&str>,
+    role_filter: Option<&str>,
+    max_results: usize,
+    generation: u64,
+) -> Result<(Vec<AXNode>, HashMap<u32, AXRef>), String> {
+    let text_lower = text_query.map(|s| s.to_lowercase());
+    let role_lower = role_filter.map(|s| s.to_lowercase());
+    let mut nodes: Vec<AXNode> = Vec::new();
+    let mut refs:  HashMap<u32, AXRef> = HashMap::new();
+    let mut uid_counter: u32 = 0;
+
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+
+        let automation: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_ALL)
+            .map_err(|e| format!("Failed to create IUIAutomation: {e}"))?;
+
+        let hwnd = if pid > 0 {
+            find_hwnd_for_pid(pid as u32)
+                .ok_or_else(|| format!("No visible window found for PID {pid}"))?
+        } else {
+            let h = GetForegroundWindow();
+            if h.0.is_null() { return Err("No foreground window".into()); }
+            h
+        };
+
+        let root = automation
+            .ElementFromHandle(hwnd)
+            .map_err(|e| format!("Failed to get root element: {e}"))?;
+
+        let condition = automation
+            .CreateTrueCondition()
+            .map_err(|e| format!("Failed to create condition: {e}"))?;
+
+        let scope = TreeScope(TreeScope_Element.0 | TreeScope_Descendants.0);
+        let elements = root
+            .FindAll(scope, &condition)
+            .map_err(|e| format!("FindAll failed: {e}"))?;
+
+        let count = elements.Length().unwrap_or(0);
+
+        for i in 0..count {
+            if nodes.len() >= max_results { break; }
+
+            let elem = match elements.GetElement(i) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+
+            let role = elem.CurrentControlType().ok()
+                .map(|ct| uia_control_type_name(ct.0))
+                .unwrap_or_else(|| "unknown".into());
+
+            // Role filter
+            if let Some(rf) = &role_lower {
+                if !role.to_lowercase().contains(rf.as_str()) { continue; }
+            }
+
+            let name = elem.CurrentName().ok().map(|n| n.to_string()).filter(|n| !n.is_empty());
+            let value = elem.GetCurrentPropertyValue(UIA_ValueValuePropertyId)
+                .ok()
+                .and_then(|v| { let s = v.to_string(); if s.is_empty() { None } else { Some(s) } });
+            let help = elem.CurrentHelpText().ok().map(|h| h.to_string()).filter(|h| !h.is_empty());
+
+            // Text filter
+            if let Some(tq) = &text_lower {
+                let hit = [name.as_deref(), value.as_deref(), help.as_deref()]
+                    .iter()
+                    .flatten()
+                    .any(|t| t.to_lowercase().contains(tq.as_str()));
+                if !hit { continue; }
+            } else if role_lower.is_none() {
+                // No filters: only include interactive elements
+                let interactive = matches!(
+                    role.as_str(),
+                    "Button" | "Edit" | "CheckBox" | "RadioButton" | "ComboBox"
+                    | "Slider" | "Hyperlink" | "MenuItem" | "TabItem" | "Text"
+                );
+                if !interactive { continue; }
+            }
+
+            let rect = elem.CurrentBoundingRectangle().ok();
+            let bounds = rect.and_then(|r| {
+                let w = (r.right - r.left) as f64;
+                let h = (r.bottom - r.top) as f64;
+                if w > 0.0 && h > 0.0 {
+                    Some(Rect { x: r.left as f64, y: r.top as f64, width: w, height: h })
+                } else { None }
+            });
+
+            let focused = elem.CurrentHasKeyboardFocus().map(|b| b.as_bool()).ok();
+            let enabled = elem.CurrentIsEnabled().map(|b| b.as_bool()).ok();
+
+            let uid_n = uid_counter;
+            uid_counter += 1;
+
+            refs.insert(uid_n, AXRef {
+                bounds: bounds.clone(),
+                role: role.clone(),
+                name: name.clone(),
+            });
+
+            nodes.push(AXNode {
+                uid: format!("a{uid_n}g{generation}"),
+                role,
+                label: name,
+                value,
+                description: help,
+                bounds,
+                enabled,
+                focused,
+                children: vec![],
+            });
+        }
+    }
+
+    Ok((nodes, refs))
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ax_get_focused — cheapest AX query: get the currently focused element
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Return the system-wide focused UIA element as a single slim AXNode.
+/// Returns `None` when no element is focused.
+pub fn ax_get_focused(
+    generation: u64,
+) -> Result<Option<(AXNode, HashMap<u32, AXRef>)>, String> {
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+
+        let automation: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_ALL)
+            .map_err(|e| format!("Failed to create IUIAutomation: {e}"))?;
+
+        let elem = match automation.GetFocusedElement() {
+            Ok(e) => e,
+            Err(_) => return Ok(None),
+        };
+
+        let role = elem.CurrentControlType().ok()
+            .map(|ct| uia_control_type_name(ct.0))
+            .unwrap_or_else(|| "unknown".into());
+
+        let label = elem.CurrentName().ok().map(|n| n.to_string()).filter(|n| !n.is_empty());
+        let value = elem.GetCurrentPropertyValue(UIA_ValueValuePropertyId)
+            .ok()
+            .and_then(|v| { let s = v.to_string(); if s.is_empty() { None } else { Some(s) } });
+        let description = elem.CurrentHelpText().ok().map(|h| h.to_string()).filter(|h| !h.is_empty());
+
+        let bounds = elem.CurrentBoundingRectangle().ok().and_then(|r| {
+            let w = (r.right - r.left) as f64;
+            let h = (r.bottom - r.top) as f64;
+            if w > 0.0 && h > 0.0 {
+                Some(Rect { x: r.left as f64, y: r.top as f64, width: w, height: h })
+            } else { None }
+        });
+
+        let enabled = elem.CurrentIsEnabled().map(|b| b.as_bool()).ok();
+
+        let mut refs: HashMap<u32, AXRef> = HashMap::new();
+        refs.insert(0, AXRef { bounds: bounds.clone(), role: role.clone(), name: label.clone() });
+
+        let node = AXNode {
+            uid: format!("a0g{generation}"),
+            role,
+            label,
+            value,
+            description,
+            bounds,
+            enabled,
+            focused: Some(true),
+            children: vec![],
+        };
+
+        Ok(Some((node, refs)))
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // element_at_point
 // ──────────────────────────────────────────────────────────────────────────────
 

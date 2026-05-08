@@ -116,6 +116,98 @@ pub fn ax_find_text(search: &str, _window_id: Option<u32>) -> Result<Vec<TextMat
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// ax_find_elements — OCR-based targeted search (AT-SPI2 stub)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Find elements matching text_query on Linux via OCR.
+/// Returns coordinate-based AXRefs that can be used with ax_click.
+pub fn ax_find_elements(
+    _pid: i32,
+    text_query: Option<&str>,
+    _role_filter: Option<&str>,
+    max_results: usize,
+    generation: u64,
+) -> Result<(Vec<AXNode>, HashMap<u32, AXRef>), String> {
+    let query = match text_query {
+        Some(q) if !q.is_empty() => q,
+        _ => return Ok((vec![], HashMap::new())),
+    };
+
+    let matches = super::ocr::find_text_ocr(query, None, false)?;
+    let mut nodes: Vec<AXNode> = Vec::new();
+    let mut refs:  HashMap<u32, AXRef> = HashMap::new();
+
+    for (i, m) in matches.iter().take(max_results).enumerate() {
+        let uid_n = i as u32;
+        let bounds = Some(m.bounds.clone());
+        refs.insert(uid_n, AXRef {
+            bounds: bounds.clone(),
+            role: m.role.as_deref().unwrap_or("Text").to_string(),
+            name: Some(m.text.clone()),
+        });
+        nodes.push(AXNode {
+            uid: format!("a{uid_n}g{generation}"),
+            role: m.role.as_deref().unwrap_or("Text").to_string(),
+            label: Some(m.text.clone()),
+            value: None,
+            description: None,
+            bounds,
+            enabled: Some(true),
+            focused: None,
+            children: vec![],
+        });
+    }
+
+    Ok((nodes, refs))
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ax_get_focused — get the currently focused element (xdotool stub)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Return the focused element on Linux via xdotool.
+/// Returns a stub AXNode with the focused window's process name.
+pub fn ax_get_focused(
+    generation: u64,
+) -> Result<Option<(AXNode, HashMap<u32, AXRef>)>, String> {
+    // Try to get the active window via xdotool
+    let out = std::process::Command::new("xdotool")
+        .args(["getactivewindow", "getwindowname"])
+        .output();
+
+    let window_title = out.ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let pid = frontmost_pid().unwrap_or(0);
+    let app_name = if pid > 0 { get_process_name(pid as u32) } else { None };
+
+    // On Linux without full AT-SPI2, we can't identify the focused *element*,
+    // only the active window.  Return a window-level stub.
+    let node = AXNode {
+        uid: format!("a0g{generation}"),
+        role: "window".to_string(),
+        label: window_title.or(app_name.clone()),
+        value: None,
+        description: app_name,
+        bounds: None,
+        enabled: Some(true),
+        focused: Some(true),
+        children: vec![],
+    };
+
+    let mut refs: HashMap<u32, AXRef> = HashMap::new();
+    refs.insert(0, AXRef {
+        bounds: None,
+        role: "window".to_string(),
+        name: node.label.clone(),
+    });
+
+    Ok(Some((node, refs)))
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // element_at_point (best-effort via xdotool)
 // ──────────────────────────────────────────────────────────────────────────────
 

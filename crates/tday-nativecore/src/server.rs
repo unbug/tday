@@ -192,6 +192,7 @@ async fn dispatch(
         "press_key"        => handlers::handle_press_key(params).await,
         "shortcut"         => handlers::handle_shortcut(params).await,
         "get_cursor_position" => handlers::handle_get_cursor_position(params).await,
+        "click_text"          => handlers::handle_click_text(params).await,
 
         // ── Navigation
         "list_windows"     => handlers::handle_list_windows(params).await,
@@ -210,6 +211,8 @@ async fn dispatch(
         "ax_set_value"        => handlers::handle_ax_set_value(params, ax).await,
         "ax_select"           => handlers::handle_ax_select(params, ax).await,
         "ax_perform_action"   => handlers::handle_ax_perform_action(params, ax).await,
+        "ax_find"             => handlers::handle_ax_find(params, ax).await,
+        "ax_focused"          => handlers::handle_ax_focused(params, ax).await,
 
         // ── Probe
         "probe_app" => {
@@ -640,6 +643,20 @@ fn tool_list() -> Vec<Tool> {
                 }
             })),
         t("get_cursor_position", "Return the current cursor (x, y)", json!({ "type": "object", "properties": {} })),
+        t("click_text",
+            "Find text on screen via AX tree (or OCR fallback) and click it in a single call. \
+             Combines find_text + click — no need to extract x/y coordinates manually. \
+             This is the fastest way to click something you can describe by its label.",
+            json!({
+                "type": "object",
+                "required": ["text"],
+                "properties": {
+                    "text":        { "type": "string", "description": "Text to find and click" },
+                    "button":      { "type": "string", "enum": ["left","right","middle"], "default": "left" },
+                    "click_count": { "type": "integer", "default": 1, "description": "1 = single click, 2 = double-click" },
+                    "use_ax":      { "type": "boolean", "default": true, "description": "Try AX tree first (faster); falls back to OCR" }
+                }
+            })),
 
         // ── Navigation
         t("list_windows", "List all on-screen windows", json!({ "type": "object", "properties": {} })),
@@ -742,6 +759,29 @@ fn tool_list() -> Vec<Tool> {
                     "uid":    { "type": "string" },
                     "action": { "type": "string" }
                 }
+            })),
+        t("ax_find",
+            "Search the AX/UIA tree for elements matching text and/or role WITHOUT dumping the full tree. \
+             Returns only matching elements (no children) — far smaller than take_ax_snapshot. \
+             Each result has a 'uid' registered in the session for immediate use with ax_click / ax_set_value. \
+             Use this instead of take_ax_snapshot when you only need specific elements.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "text":        { "type": "string",  "description": "Substring to match in label / value / description (case-insensitive)" },
+                    "role":        { "type": "string",  "description": "Role substring filter, e.g. 'button', 'textfield', 'checkbox'" },
+                    "app_name":    { "type": "string",  "description": "Target app name (default: frontmost)" },
+                    "pid":         { "type": "integer", "description": "Target process id (overrides app_name)" },
+                    "max_results": { "type": "integer", "default": 20, "description": "Maximum elements to return" }
+                }
+            })),
+        t("ax_focused",
+            "Return the currently focused AX element as a single slim node — the cheapest possible AX query. \
+             The returned uid is registered in the session for immediate use with ax_set_value / ax_perform_action. \
+             Use this to interact with whatever the user currently has focused (e.g., active text field).",
+            json!({
+                "type": "object",
+                "properties": {}
             })),
 
         // ── Probe
