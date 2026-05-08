@@ -39,12 +39,15 @@ export const COMPUTER_USE_AGENTS: AgentId[] = ['claude-code', 'gemini', 'opencod
  */
 export const COMPUTER_USE_SKILL = `\
 You have computer use capabilities via the \`${MCP_SERVER_KEY}\` MCP server.
-These tools let you control the macOS desktop, browsers, and Android devices.
+These tools let you control the desktop, browsers, and Android devices on macOS, Windows, and Linux.
 
 ## Decision tree — pick the right approach first
 
 \`\`\`
-User request involves the desktop / a running app?
+Need to READ all text from a document/page/terminal?
+  └─ get_page_content   ← fastest: Select-All + Copy, zero permissions, any app
+
+User request involves interacting with a running app?
   ├─ 1st choice — AX (most reliable; no Screen Recording needed; survives window moves):
   │    take_ax_snapshot → ax_click / ax_set_value / ax_select / ax_perform_action
   │    Works for: all native macOS apps, most Electron apps (non-web-content areas)
@@ -113,7 +116,8 @@ User request involves the desktop / a running app?
 | Tool | Notes |
 |------|-------|
 | \`execute_command\` | Run shell commands (\`mode: "shell"\`) or AppleScript (\`mode: "osascript"\`) |
-| \`clipboard\` | \`mode: "get"\` to read, \`mode: "set"\` to write clipboard text |
+| \`clipboard\` | \`mode: "get"\` / \`mode: "set"\` — read or write clipboard text (macOS, Windows, Linux) |
+| \`get_page_content\` | **Fastest text extraction** — Select-All + Copy + read clipboard. Use to read full content of a document, terminal, or page without screenshot/OCR. Automatically restores the original clipboard. Works on macOS (Cmd+A/C), Windows and Linux (Ctrl+A/C). |
 | \`process\` | List/kill processes. Useful to check if an app is already running |
 | \`filesystem\` | Read, write, list, search files — use instead of shell when the path is known |
 | \`scrape\` | Fetch a URL and return its body as text |
@@ -124,6 +128,17 @@ Use \`android_list_devices\` first to confirm a device is connected, then \`andr
 Tools mirror the macOS set: \`android_screenshot\`, \`android_click\`, \`android_type_text\`, \`android_find_text\`, \`android_launch_app\`.
 
 ## Common task patterns
+
+**Read full content of current document/page (fastest)**
+\`\`\`
+get_page_content {}
+// → { text: "...all text in the focused window...", length: N }
+// Use when: reading a document, terminal output, text editor, or browser page.
+// Advantages over screenshot+OCR or AX tree: zero permissions needed, works
+// in any app, returns clean text in milliseconds.
+// Tip: call focus_window / take_ax_snapshot first if the target window is
+// not already focused.
+\`\`\`
 
 **Open an app and interact with it**
 \`\`\`
@@ -171,6 +186,7 @@ shortcut {shortcut: "ctrl+a"}             // Select all (Linux/Windows apps)
 \`\`\`
 
 ## Reliability rules
+- **Use \`get_page_content\` to read text** — fastest, zero permissions, works in any app. Prefer it over screenshot+OCR or full AX tree traversal when you just need the text.
 - **Start with AX, not screenshots** — \`take_ax_snapshot\` and \`find_text\` work without Screen Recording permission and are faster. Use \`take_screenshot\` only when the UI is non-standard (canvas, game, PDF, custom-drawn).
 - **Verify cheaply after actions** — check with \`find_text\` or an AX value query first. Only escalate to \`take_screenshot\` if the cheap check is insufficient.
 - **Prefer AX/CDP over pixel clicks** — coordinates break if the window moves; uid-based AX clicks do not.

@@ -6,6 +6,7 @@
 
 use crate::error::{DevToolsError, Result};
 use crate::platform;
+use crate::handlers::system::select_all_modifier;
 use serde_json::{json, Value};
 use std::time::Duration;
 
@@ -115,9 +116,10 @@ pub async fn handle_type_text(params: Value) -> Result<Value> {
             platform::click(cx, cy, platform::MouseButton::Left, 1)?;
             std::thread::sleep(Duration::from_millis(100));
         }
-        // 2. Clear field content (Cmd+A then Delete)
+        // 2. Clear field content (select-all then Delete).
+        //    Use Cmd+A on macOS, Ctrl+A on Windows/Linux.
         if clear {
-            platform::press_key("a", &["command".to_string()])?;
+            platform::press_key("a", &[select_all_modifier().to_string()])?;
             std::thread::sleep(Duration::from_millis(50));
             platform::press_key("delete", &[])?;
             std::thread::sleep(Duration::from_millis(50));

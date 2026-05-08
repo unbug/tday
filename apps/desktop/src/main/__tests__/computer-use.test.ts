@@ -16,6 +16,7 @@ import {
   MCP_SERVER_KEY,
   COMPUTER_USE_SETTING_KEY,
   COMPUTER_USE_AGENTS,
+  COMPUTER_USE_SKILL,
 } from '../computer-use.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -346,5 +347,26 @@ describe('writeComputerUseSkillFiles / removeComputerUseSkillFiles', () => {
 
   it('removeComputerUseSkillFiles is safe when files do not exist', () => {
     expect(() => removeComputerUseSkillFiles(tmpHome)).not.toThrow();
+  });
+});
+
+// ── COMPUTER_USE_SKILL content ────────────────────────────────────────────────
+
+describe('COMPUTER_USE_SKILL', () => {
+  it('documents the get_page_content tool', () => {
+    expect(COMPUTER_USE_SKILL).toContain('get_page_content');
+  });
+
+  it('documents clipboard tool', () => {
+    expect(COMPUTER_USE_SKILL).toContain('clipboard');
+  });
+
+  it('includes the read-page-content pattern example', () => {
+    expect(COMPUTER_USE_SKILL).toContain('get_page_content {}');
+  });
+
+  it('mentions cross-platform support (Windows/Linux)', () => {
+    expect(COMPUTER_USE_SKILL).toContain('Windows');
+    expect(COMPUTER_USE_SKILL).toContain('Linux');
   });
 });

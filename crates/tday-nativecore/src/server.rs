@@ -79,10 +79,11 @@ impl ServerHandler for DevToolsServer {
                 version: env!("CARGO_PKG_VERSION").to_string(),
             },
             instructions: Some(
-                "Native desktop automation MCP server for macOS.\n\
+                "Native desktop automation MCP server for macOS, Windows, and Linux.\n\
                  take_screenshot -> find_text/find_image to locate elements.\n\
                  click/type_text for coordinate input.\n\
-                 take_ax_snapshot + ax_click/ax_set_value for element-precise automation.\n"
+                 take_ax_snapshot + ax_click/ax_set_value for element-precise automation.\n\
+                 get_page_content: fastest way to read all text from a focused window (Select-All + Copy).\n"
                 .into(),
             ),
         }
@@ -223,6 +224,7 @@ async fn dispatch(
         "scrape"          => handlers::handle_scrape(params).await,
         "execute_command" => handlers::handle_execute_command(params).await,
         "clipboard"       => handlers::handle_clipboard(params).await,
+        "get_page_content" => handlers::handle_get_page_content(params).await,
         "sys_process"     => handlers::handle_process(params).await,
         "filesystem"      => handlers::handle_filesystem(params).await,
 
@@ -777,13 +779,33 @@ fn tool_list() -> Vec<Tool> {
                     "timeout": { "type": "integer", "default": 10, "description": "Seconds before killing the process (max 60)" }
                 }
             })),
-        t("clipboard", "Get or set the macOS clipboard text content",
+        t("clipboard", "Get or set the system clipboard text (macOS, Windows, Linux)",
             json!({
                 "type": "object",
                 "required": ["mode"],
                 "properties": {
                     "mode": { "type": "string", "enum": ["get","set"] },
                     "text": { "type": "string", "description": "Required for mode=set" }
+                }
+            })),
+        t("get_page_content",
+            "Read full text content of the currently focused window by simulating Select-All → Copy and reading the clipboard. \
+             Fastest way to obtain large bodies of text — no screenshot, no OCR, no AX tree traversal. \
+             Works on macOS (Cmd+A/C), Windows and Linux (Ctrl+A/C). \
+             Optionally restores the original clipboard after reading.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "restore_clipboard": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Restore the original clipboard content after reading (default true)"
+                    },
+                    "wait_ms": {
+                        "type": "integer",
+                        "default": 200,
+                        "description": "Milliseconds to wait after Copy before reading the clipboard (increase for slow apps, max 10000)"
+                    }
                 }
             })),
         t("sys_process", "List or kill OS processes",
