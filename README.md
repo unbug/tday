@@ -1,6 +1,6 @@
 # Tday — All-in-One Harness Agent Terminal
 
-> One terminal launcher for every coding-agent harness — Claude Code, Codex, Copilot CLI, OpenCode, Pi, and more. Browser-style tabs, unified provider config, auto-detected local inference, long-term memory, and cross-agent token analytics.
+> One terminal launcher for every coding-agent harness — Claude Code, Codex, Copilot CLI, OpenCode, Pi, and more. Browser-style tabs, unified provider config, auto-detected local inference, long-term memory, cross-agent token analytics, and **cross-platform Computer Use** (macOS · Windows · Linux).
 
 [![latest](https://img.shields.io/badge/release-latest-blue)](https://github.com/unbug/tday/releases)
 
@@ -57,7 +57,13 @@
 ---
 ## Installation
 
-Download the latest `.dmg` (macOS) or `.exe` (Windows) from [Releases](https://github.com/unbug/tday/releases).
+Download the latest release for your platform from [Releases](https://github.com/unbug/tday/releases):
+
+| Platform | Artifact |
+|---|---|
+| macOS (arm64 + x64) | `.dmg` |
+| Windows x64 | `.exe` (NSIS installer) or `.zip` |
+| Linux x64 | `.AppImage` or `.tar.gz` |
 
 ### macOS — "unverified developer" warning
 
@@ -88,6 +94,20 @@ The build is **not code-signed** with a Microsoft Authenticode certificate. Wind
 > ```
 > then restart Tday.
 
+### Linux — AppImage
+
+Make the downloaded `.AppImage` executable and run it:
+
+```bash
+chmod +x Tday-*.AppImage
+./Tday-*.AppImage
+```
+
+> **Computer Use on Linux** requires `xdotool`, `wmctrl`, `scrot`, and `tesseract-ocr`:
+> ```bash
+> sudo apt install xdotool wmctrl scrot tesseract-ocr
+> ```
+
 ---
 
 ## 1. Vision
@@ -109,7 +129,7 @@ Today, every coding-agent harness ships with its own CLI, its own provider confi
 
 | # | Feature | Description |
 |---|---|---|
-| 1 | **Computer Use** (macOS Apple Silicon + Intel · Windows/Linux coming soon) | Give any agent hands on your desktop — **no vision model required**. Uses native Accessibility APIs to read and control any app directly, without screenshots. One-click enable for **Claude Code, Codex, Gemini, OpenCode, and Pi**. Agents can click UI elements, type, scroll, open apps, control Chrome via CDP, and fall back to OCR when needed. Built-in **Computer Operator** CoWorker + one-click permission setup. Runs natively on **macOS Apple Silicon and Intel**; Windows and Linux support coming soon. |
+| 1 | **Computer Use** (macOS · Windows · Linux) | Give any agent hands on your desktop — **no vision model required**. Uses native Accessibility APIs to read and control any app directly, without screenshots. One-click enable for **Claude Code, Codex, Gemini, OpenCode, and Pi**. Agents can click UI elements, type, scroll, open apps, control Chrome via CDP, and fall back to OCR when needed. Built-in **Computer Operator** CoWorker + one-click permission setup. Runs natively on **macOS (arm64 + x64)**, **Windows x64**, and **Linux x64**. |
 | 2 | **Multi-tab workspace** | Open any agent in browser-style tabs, drag to reorder, multi-row wrap, per-tab working directory with cwd commit and last-cwd persistence. |
 | 3 | **10 AI agent adapters** | Pi, Claude Code, Codex CLI, GitHub Copilot CLI, OpenCode, Gemini CLI, Qwen-Code, Crush, Hermes, DeepSeekTUI — each with auto-detect, one-click install, and per-agent accent color. |
 | 4 | **CoWorker system** | Reusable role personas injected as system prompts — selected per tab from the CwdBar. 35 built-in presets across 7 categories sourced from [`CoWorkers.md`](./CoWorkers.md), or your own custom/online CoWorkers. Community contributions welcome. |
@@ -164,9 +184,9 @@ Today, every coding-agent harness ships with its own CLI, its own provider confi
 │                                                                     │
 │  tday-nativecore (Rust MCP stdio server, Computer Use)              │
 │  ├─ AX tree: take_ax_snapshot / ax_click / ax_set_value / …        │
-│  ├─ OCR: find_text (Vision + multi-display) / ocr_screenshot        │
-│  ├─ Mouse/keyboard: click / type_text / shortcut / scroll / drag    │
-│  ├─ Screenshot: take_screenshot (per display, CGDirectDisplayID)    │
+  ├─ OCR: find_text (Vision/WinRT OCR/Tesseract, multi-display)      │
+  ├─ Mouse/keyboard: click / type_text / shortcut / scroll / drag    │
+  ├─ Screenshot: take_screenshot (per display, all platforms)        │
 │  ├─ CDP: probe_app / cdp_connect / cdp_find_elements / cdp_click    │
 │  ├─ Android: adb_tap / adb_key / adb_screenshot                     │
 │  └─ Launcher: open_app                                              │
@@ -181,7 +201,7 @@ Today, every coding-agent harness ships with its own CLI, its own provider confi
 | Window, tabs, UI | Electron + React | Mature, fast iteration, rich ecosystem. |
 | PTY spawning | Electron main (node-pty) | Battle-tested, full TTY semantics, integrates cleanly with xterm.js. |
 | Detection / tokenization / memory | Rust (`tday-core`) | CPU-bound, must not block UI. Static binary, easy to ship & cross-compile. |
-| Computer Use tools (AX, OCR, mouse, CDP) | Rust (`tday-nativecore`) | Native macOS APIs (Accessibility, Vision, CGEvent); zero overhead on the Node event loop. |
+| Computer Use tools (AX, OCR, mouse, CDP) | Rust (`tday-nativecore`) | macOS: Accessibility + Vision + CGEvent. Windows: UIA + SendInput + GDI + WinRT OCR. Linux: X11/XTest + XRandR + scrot + Tesseract. Zero overhead on the Node event loop. |
 | Provider secrets | OS keychain via Rust | Avoid plaintext in app data; cross-platform. |
 
 ### Gateway — OpenAI Responses API → Anthropic proxy
@@ -256,7 +276,7 @@ A **Tab** owns one **Session** = one PTY process bound to one agent adapter, one
 | ~~**v0.6.x**~~ ✅ | CoWorker system | **Settings → CoWorkers** tab: create/edit/delete role personas injected as system prompts. Three source types: built-in (`builtin:*` from AGENT.md), online (`online:*` URL-cached from GitHub), custom (inline text / local file / URL). Three curated presets (Karpathy Code Guidelines, Devin-style Planner, Earnings Call Analyst). CoWorker dropdown in CwdBar — select per tab, prompt injected immediately into the running PTY. CoWorker binding in Cron jobs. Settings dialog tabs now top-tab style; backdrop `no-drag` fix so tabs are always clickable even when TabBar wraps to multiple rows. |
 | ~~**v0.7.x**~~ ✅ | CoWorker Registry + Data Freshness | CoWorker registry expanded to **35 built-in presets across 7 categories** (Mental Models, Startup & Business, Coding & Engineering, Writing & Content, Research & Analysis, Security & Privacy, Productivity). GitHub ★ stars on cards and detail view (24 h TTL cache). Unique ID derivation per entry (`deriveRegistrySlug`). Online refresh button with spinner + error state. **App-level state lifting**: agents / coworkers / providers owned by App root, passed as props to Settings — eliminates IPC stutter on every Settings open. `requestIdleCallback` background refresh after Settings closes (5 s timeout fallback). New-tab provider submenu now includes all preset models alongside discovered & user-added models. |
 | ~~**v0.8.x**~~ ✅ | Computer Use | **Settings → Computer Use** tab: one-click enable per agent. `tday-nativecore` Rust binary injected as MCP server (stdio). **20+ tools**: AX tree (`take_ax_snapshot`, `ax_click`, `ax_set_value`, `ax_perform_action`), OCR (`find_text` with multi-display CGDirectDisplayID, `ocr_screenshot`), mouse/keyboard (`click`, `double_click`, `right_click`, `type_text`, `shortcut`, `scroll`, `drag`), screenshot (`take_screenshot`), CDP (`probe_app`, `cdp_connect`, `cdp_find_elements`, `cdp_click`, `cdp_fill`), Android ADB (`adb_tap`, `adb_key`), app launcher (`open_app`). Decision-tree skill: AX first → visual fallback → CDP last resort. **Computer Operator** built-in CoWorker preset. Permissions panel (Accessibility + Screen Recording) with always-visible Grant buttons + manual path instructions. macOS arm64 + x64. |
-| **v0.9.x** 🔄 | Web Search & Web Tools | Search provider settings (Brave, Tavily, Jina, Perplexity). One-click MCP server install for each. Per-agent search-enable toggle. Web page reader / URL fetcher as shared tool. |
+| ~~**v0.9.x**~~ ✅ | Cross-platform Computer Use + Web Tools | **Windows**: UIA (IUIAutomation) AX tree, SendInput mouse/keyboard, BitBlt/GDI screenshots, WinRT OCR. **Linux**: X11/XTest input, XRandR display, scrot + XGetImage screenshots, Tesseract OCR, wmctrl window management. Same 20+ MCP tools on all 3 platforms. GitHub Actions CI now builds and packages **macOS arm64 + Windows x64 + Linux x64** on every tag push. |
 | **v0.10.0** | MCP Management | MCP server registry in Settings (add/edit/remove, stdio & SSE transports). Auto-discover running local MCP processes. Per-agent MCP binding. Bundled quick-add servers: filesystem, memory, fetch, git. |
 | **v0.11.0** | Skills & Custom Instructions | Per-agent, per-project skill files (`AGENTS.md`, `SKILL.md`, `.instructions.md`). Global skills library in Settings. Skill injection at spawn time. Skill marketplace (import from URL / GitHub). |
 | **v0.12.0** | Channels Management | Named I/O channels in Settings: pipe agent stdout to files, webhooks, or other agents. Fan-out (broadcast one agent's output to multiple sinks). Fan-in (merge streams from multiple agents into one tab). |
@@ -485,7 +505,31 @@ Make `AgentAdapter` a public package so the community can ship their own agent i
 - [x] **Permissions panel** — Accessibility + Screen Recording with always-visible Grant buttons, manual path instructions ("System Settings → Privacy & Security → …"), `checkPermissions` IPC, `requestPermission` IPC
 - [x] Self-signed cert for CI signing (hardcoded in `release.yml`) — prevents macOS TCC re-prompting on every update
 
-### v0.9.x — Web Search & Web Tools 🔄
+### ~~v0.9.x — Cross-platform Computer Use~~ ✅
+Windows and Linux now have full feature parity with macOS Computer Use — same 20+ MCP tools, same API surface.
+
+- [x] **Windows platform** (`crates/tday-nativecore/src/platform/windows/`)
+  - [x] `uia.rs` — IUIAutomation AX tree (`take_ax_snapshot`), coordinate-based `AXRef`, `ax_click / ax_set_value / ax_perform_action`
+  - [x] `input.rs` — `SendInput` mouse/keyboard; Unicode text input; all modifier keys and function keys
+  - [x] `display.rs` — `EnumDisplayMonitors` multi-monitor, DPI-aware coordinate mapping (Per-Monitor V2)
+  - [x] `screenshot.rs` — BitBlt/GDI capture (full screen / region / window), `image` crate PNG+JPEG encoding
+  - [x] `ocr.rs` — WinRT `Windows.Media.Ocr` (Windows 10 1903+), word-level bounding boxes
+  - [x] `window.rs` — `EnumWindows`, DWM extended frame bounds, per-window PID
+  - [x] `app.rs` — `EnumProcesses` app list, `cmd /c start` launcher, `TerminateProcess`, wmctrl-style `SetWindowPos`
+- [x] **Linux platform** (`crates/tday-nativecore/src/platform/linux/`)
+  - [x] `input.rs` — X11 XTest (`XTestFakeButtonEvent`, `XTestFakeKeyEvent`, `XTestFakeMotionEvent`); `xdotool type` for Unicode
+  - [x] `display.rs` — XRandR CRTC enumeration; `GDK_SCALE` fractional scale support
+  - [x] `screenshot.rs` — `scrot` / `import` / `xwd+convert` with X11 `XGetImage` fallback; BGRA→RGBA conversion
+  - [x] `ocr.rs` — Tesseract subprocess, TSV output parsing, word-level bounding boxes
+  - [x] `window.rs` — `wmctrl -l -G` window list, `/proc/<pid>/comm` process name
+  - [x] `app.rs` — `/proc` process enumeration, `wmctrl` / `xdotool` activation, `kill -TERM/-KILL`, `xdg-open` launcher
+  - [x] `atspi.rs` — coordinate-based `AXRef` stub; `xdotool`/`xprop` for `element_at_point` and `frontmost_pid`
+- [x] **`platform/mod.rs`** — Windows + Linux cfg blocks + `pub use` re-exports
+- [x] **`session/ax_session.rs`** — `#[cfg(target_os = "macos")]` → `#[cfg(any(macos, windows, linux))]`
+- [x] **`handlers/probe_app.rs`**, **`tracking/hover_tracker.rs`**, **`tracking/screen_recorder.rs`** — same cfg expansion
+- [x] **CI** — `.github/workflows/release.yml` re-enables `windows-2022` and `ubuntu-22.04` matrix; Linux apt installs `libgtk-3-dev libx11-dev libxrandr-dev libxtst-dev` and packaging tools
+
+### v0.10.x — Web Search & Web Tools
 Give every agent instant access to the live web — configure search providers in Settings and inject them as MCP tools per agent.
 
 - [ ] **Settings → Web Search** sub-panel
@@ -602,8 +646,8 @@ Those generated files are ignored by git and are not meant to be committed.
 
 The repository ships with `.github/workflows/release.yml`.
 
-- Push to `main`: builds macOS (`x64`, `arm64`), Windows (`x64`), and Linux (`x64`) packages on GitHub Actions and uploads them as workflow artifacts.
-- Push a tag like `v0.1.12`: builds the same cross-platform artifacts and publishes them to a GitHub Release automatically.
+- Push to `main`: no build (avoids noise on every commit).
+- Push a tag like `v0.9.17`: builds **macOS arm64**, **Windows x64**, and **Linux x64** artifacts in parallel and publishes them to a GitHub Release automatically.
 - Run the workflow manually: builds artifacts on demand; if `publish` is enabled, it creates a draft GitHub Release.
 
 The CI packaging step uses `electron-builder --publish never`, so the build pipeline uploads release assets to GitHub Releases only and does not push packaged binaries back to the repository.
@@ -615,8 +659,8 @@ The CI packaging step uses `electron-builder --publish never`, so the build pipe
 git push origin main
 
 # 2. create a version tag to trigger a GitHub Release
-git tag v0.1.12
-git push origin v0.1.12
+git tag v0.9.17
+git push origin v0.9.17
 ```
 
 ---

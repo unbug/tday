@@ -39,15 +39,14 @@ jobs:
             platform: mac
             arch: arm64
             runner: macos-14
-          # windows and linux builds temporarily disabled
-          # - label: windows x64
-          #   platform: win
-          #   arch: x64
-          #   runner: windows-2022
-          # - label: linux x64
-          #   platform: linux
-          #   arch: x64
-          #   runner: ubuntu-22.04
+          - label: windows x64
+            platform: win
+            arch: x64
+            runner: windows-2022
+          - label: linux x64
+            platform: linux
+            arch: x64
+            runner: ubuntu-22.04
     runs-on: ${{ matrix.runner }}
     env:
       ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
@@ -107,6 +106,16 @@ jobs:
           # Let electron-builder auto-discover the identity
           echo "CSC_KEYCHAIN=$KEYCHAIN_PATH" >> $GITHUB_ENV
           rm "$RUNNER_TEMP/certificate.p12"
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev \
+            librsvg2-dev patchelf libasound2-dev libx11-dev libxrandr-dev \
+            libxtst-dev libxfixes-dev libxcomposite-dev libxi-dev \
+            rpm fakeroot
 
       - name: Build tday-nativecore (Computer Use MCP binary)
         run: cargo build --release

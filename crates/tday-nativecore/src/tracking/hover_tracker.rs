@@ -244,11 +244,11 @@ pub fn start_polling(
 }
 
 fn get_cursor_position_sync() -> Result<(f64, f64), String> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     {
         crate::platform::get_cursor_position()
     }
-    #[cfg(not(any(target_os = "macos")))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
         Err("Hover tracking is not supported on this platform".to_string())
     }
@@ -259,13 +259,13 @@ fn element_at_point_for_hover(
     y: f64,
     app_name: Option<&str>,
 ) -> Result<HoverElement, String> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     {
         let info = crate::platform::element_at_point(x, y, app_name)?;
         let value = serde_json::to_value(&info).map_err(|e| e.to_string())?;
         Ok(parse_hover_element(&value))
     }
-    #[cfg(not(any(target_os = "macos")))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
         let _ = (x, y, app_name);
         Err("Hover tracking is not supported on this platform".to_string())

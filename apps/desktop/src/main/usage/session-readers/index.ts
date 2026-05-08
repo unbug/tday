@@ -7,9 +7,11 @@
  * interception required.
  *
  * Supported agents and their storage:
- *   claude-code  ~/.claude/projects/**\/*.jsonl          (JSONL per session)
- *   codex        ~/.codex/sessions/YYYY/MM/DD/*.jsonl    (JSONL per session)
- *   opencode     ~/.local/share/opencode/opencode.db     (SQLite)
+ *   claude-code  ~/.claude/projects/**\/*.jsonl                           (JSONL per session)
+ *   codex        ~/.codex/sessions/YYYY/MM/DD/*.jsonl                    (JSONL per session)
+ *   opencode     ~/.local/share/opencode/opencode.db                     (SQLite)
+ *   pi           ~/.pi/agent/sessions/<encoded-cwd>/<ts>_<uuid>.jsonl    (JSONL per session)
+ *   gemini       ~/.gemini/tmp/<project-id>/chats/session-*.jsonl         (JSONL per session)
  *
  * Can be called at any time — whether or not the agent is currently running,
  * and whether or not Tday is open.
@@ -30,9 +32,9 @@ export const SESSION_FILE_AGENTS = new Set(['claude-code', 'codex', 'opencode', 
  * Scan all supported agents' session files and return the combined list of
  * usage records, filtered by the given criteria.
  *
- * Records for agents not listed in SESSION_FILE_AGENTS (e.g. `pi`) are NOT
- * included here — they continue to be tracked via the existing usage.jsonl
- * append mechanism.
+ * Agents in SESSION_FILE_AGENTS are tracked exclusively via their native
+ * session files. All other agents are tracked via the usage.jsonl append
+ * mechanism (gateway proxy or PTY-scraping).
  */
 export function scanAllSessions(filter: UsageFilter = {}): UsageRecord[] {
   const { fromTs, toTs, agentId } = filter;

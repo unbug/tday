@@ -143,7 +143,7 @@ fn capture_frontmost_frame(
     app_name_cache: &std::collections::HashMap<i32, String>,
     output_dir: &Path,
 ) -> Result<(RecordedFrame, i32, String), String> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     {
         let windows = crate::platform::list_windows()
             .map_err(|e| format!("Failed to list windows: {e}"))?;
@@ -186,10 +186,10 @@ fn capture_frontmost_frame(
         ))
     }
 
-    #[cfg(not(any(target_os = "macos")))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
         let _ = (app_name_cache, output_dir);
-        Err("Screen recording is only supported on macOS".to_string())
+        Err("Screen recording is not supported on this platform".to_string())
     }
 }
 

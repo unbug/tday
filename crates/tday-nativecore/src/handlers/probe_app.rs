@@ -25,7 +25,7 @@ pub struct ProbeAppResult {
     pub bundle_id: Option<String>,
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn classify_running(pid: i32, bundle_id: Option<&str>, app_name: &str) -> AppKind {
     if crate::platform::is_chrome_browser(bundle_id, app_name) {
         return AppKind::ChromeBrowser;
@@ -36,7 +36,7 @@ fn classify_running(pid: i32, bundle_id: Option<&str>, app_name: &str) -> AppKin
     AppKind::Native
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn classify_installed(app_name: &str) -> AppKind {
     if crate::platform::is_electron_app_by_name(app_name) {
         return AppKind::ElectronApp;
@@ -45,7 +45,7 @@ fn classify_installed(app_name: &str) -> AppKind {
 }
 
 pub fn probe_app(app_name: &str) -> CallToolResult {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     {
         let apps = crate::platform::list_apps();
         let needle = app_name.to_lowercase();
@@ -79,7 +79,7 @@ pub fn probe_app(app_name: &str) -> CallToolResult {
         )])
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
         CallToolResult::error(vec![Content::text(
             "probe_app is not supported on this platform",

@@ -8,7 +8,7 @@
 /// UIDs are strings of the form `"a<N>g<gen>"`.  The generation is bumped on
 /// every new snapshot, so stale uids are rejected by construction.
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use crate::platform::AXRef;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -47,24 +47,24 @@ impl std::fmt::Display for LookupError {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 struct Snapshot {
     generation: u64,
     refs: HashMap<u32, AXRef>,
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub struct AxSession {
     current: RwLock<Option<Snapshot>>,
     next_gen: AtomicU64,
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 impl Default for AxSession {
     fn default() -> Self { Self::new() }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 impl AxSession {
     pub fn new() -> Self {
         Self { current: RwLock::new(None), next_gen: AtomicU64::new(1) }
