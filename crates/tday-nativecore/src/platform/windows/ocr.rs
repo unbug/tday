@@ -7,7 +7,6 @@
 //! Falls back to an empty result set on older systems.
 
 use crate::platform::types::{Rect, TextMatch};
-use windows::core::Interface;
 use windows::Graphics::Imaging::{BitmapDecoder, SoftwareBitmap};
 use windows::Media::Ocr::OcrEngine;
 use windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
@@ -135,11 +134,7 @@ fn load_png_to_software_bitmap(png_data: &[u8]) -> Result<SoftwareBitmap, String
     // Rewind stream to start
     stream.Seek(0).map_err(|e| format!("Seek failed: {e}"))?;
 
-    let decoder = BitmapDecoder::CreateAsync(
-        BitmapDecoder::PngDecoderId()
-            .map_err(|e| format!("PNG decoder ID failed: {e}"))?,
-        &stream,
-    )
+    let decoder = BitmapDecoder::CreateAsync(&stream)
     .map_err(|e| format!("BitmapDecoder create failed: {e}"))?
     .get()
     .map_err(|e| format!("BitmapDecoder async failed: {e}"))?;

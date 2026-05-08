@@ -6,7 +6,6 @@
 //! Implements list_apps, launch_app, quit_app, activate_app, etc.
 
 use crate::platform::types::AppInfo;
-use std::collections::HashMap;
 use windows::Win32::Foundation::{CloseHandle, BOOL, HWND, LPARAM, TRUE};
 use windows::Win32::System::ProcessStatus::EnumProcesses;
 use windows::Win32::System::Threading::{
@@ -61,7 +60,6 @@ pub fn list_apps() -> Vec<AppInfo> {
 }
 
 fn collect_window_pids() -> std::collections::HashSet<u32> {
-    let mut pids: std::collections::HashSet<u32> = std::collections::HashSet::new();
     struct State(std::collections::HashSet<u32>);
     let mut state = State(std::collections::HashSet::new());
     unsafe {

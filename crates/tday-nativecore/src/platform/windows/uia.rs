@@ -11,15 +11,13 @@
 //! - frontmost_pid / pid_for_window: Process ID utilities
 //! - raise_windows / resize_window_by_pid: Window management
 
-use crate::platform::types::{AXNode, Rect, TextMatch, WindowInfo};
+use crate::platform::types::{AXNode, Rect, TextMatch};
 use std::collections::HashMap;
-use std::sync::Arc;
 use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationTreeWalker, TreeScope,
     TreeScope_Descendants, TreeScope_Element,
-    UIA_ValueValuePropertyId, UIA_ExpandCollapseExpandCollapseStatePropertyId,
-    UIA_SelectionItemIsSelectedPropertyId,
+    UIA_ValueValuePropertyId,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, SetForegroundWindow, ShowWindow, BringWindowToTop, SW_RESTORE,
@@ -27,10 +25,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowTextLengthW, SetWindowPos, HWND_TOP, SWP_NOACTIVATE,
 };
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT, TRUE};
-use windows::Win32::System::Threading::{
-    AttachThreadInput, GetCurrentThreadId, OpenProcess, TerminateProcess,
-    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
-};
+use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 
 const MAX_DEPTH: u32 = 50;
 const MAX_ELEMENTS: usize = 10_000;

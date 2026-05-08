@@ -8,15 +8,14 @@
 
 use crate::platform::types::Screenshot;
 use std::mem;
-use windows::Win32::Foundation::{HWND, POINT, RECT};
+use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
 use windows::Win32::Graphics::Gdi::{
     BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject,
-    GetDC, GetDIBits, MonitorFromPoint, ReleaseDC, SelectObject,
+    GetDC, GetDIBits, ReleaseDC, SelectObject,
     BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HDC,
-    MONITOR_DEFAULTTONEAREST, SRCCOPY,
+    SRCCOPY,
 };
-use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
 
 /// Capture the entire virtual screen (all monitors combined).
