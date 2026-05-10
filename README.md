@@ -150,48 +150,64 @@ Today, every coding-agent harness ships with its own CLI, its own provider confi
 
 ## 3. Architecture
 
-```
-┌──────────────────────── Tday Desktop App ────────────────────────┐
-│                                                                     │
-│  Renderer (React + Vite + TS)                                       │
-│  ├─ Tab Manager (browser-style)                                     │
-│  ├─ Terminal View (xterm.js + WebGL renderer)                       │
-│  ├─ Agent Picker, Settings, Memory Browser, Usage Dashboard         │
-│  └─ UI kit: Tailwind + shadcn/ui + border-beam (magicui)            │
-│                          ▲                                          │
-│                          │ IPC (typed, contextBridge)               │
-│                          ▼                                          │
-│  Main Process (Electron + Node)                                     │
-│  ├─ Session Service       (one PTY per tab via node-pty)            │
-│  ├─ Agent Adapter Registry (pi, claude-code, codex, copilot, opencode, …)    │
-│  ├─ Provider Service       (env-var injection + secret store)       │
-│  ├─ IPC Bridge             (typed channels)                         │
-│  ├─ Gateway (local HTTP proxy: OpenAI Responses API → Anthropic)    │
-│  │    ├─ bridge/  (input · tools · response · stream conversion)    │
-│  │    ├─ anthropic/  (HTTP client + SSE parser)                     │
-│  │    └─ deepseek/   (thinking encoder · per-session state cache)   │
-│  ├─ Spawns: tday-core (Rust)                                        │
-│  └─ Spawns: tday-nativecore (Rust MCP, Computer Use)               │
-│                          ▲                                          │
-│                          │ JSON-RPC over stdio / Unix socket        │
-│                          ▼                                          │
-│  tday-core (Rust binary, single static executable)               │
-│  ├─ Local-inference scanner (ollama/lmstudio/llama.cpp/vllm)        │
-│  ├─ Token counter (tiktoken-rs / tokenizers)                        │
-│  ├─ Memory store (SQLite + sqlite-vec for embeddings)               │
-│  ├─ Usage logger (per-agent, per-provider, per-tab)                 │
-│  └─ Config & secrets (keyring crate, OS keychain)                   │
-│                                                                     │
-│  tday-nativecore (Rust MCP stdio server, Computer Use)              │
-│  ├─ AX tree: take_ax_snapshot / ax_click / ax_set_value / …        │
-  ├─ OCR: find_text (Vision/WinRT OCR/Tesseract, multi-display)      │
-  ├─ Mouse/keyboard: click / type_text / shortcut / scroll / drag    │
-  ├─ Screenshot: take_screenshot (per display, all platforms)        │
-│  ├─ CDP: probe_app / cdp_connect / cdp_find_elements / cdp_click    │
-│  ├─ Android: adb_tap / adb_key / adb_screenshot                     │
-│  └─ Launcher: open_app                                              │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph App["Tday Desktop App"]
+        subgraph Renderer["🖥 Renderer · React + Vite + TypeScript"]
+            R1["Tab Manager (browser-style tabs)"]
+            R2["Terminal View (xterm.js + WebGL)"]
+            R3["Agent Picker · Settings · Usage Dashboard"]
+            R4["UI: Tailwind + shadcn/ui + border-beam"]
+        end
+
+        IPC(["⇅ IPC · typed contextBridge"])
+
+        subgraph Main["⚡ Main Process · Electron + Node"]
+            M1["Session Service — node-pty, one PTY per tab"]
+            M2["Agent Adapter Registry\npi · claude-code · codex · copilot · opencode · gemini · …"]
+            M3["Provider Service — env-var injection + secret store"]
+            M4["IPC Bridge — typed channels"]
+            subgraph GW["Gateway · OpenAI Responses API → Anthropic"]
+                G1["bridge/ — input · tools · response · stream"]
+                G2["anthropic/ — HTTP client + SSE parser"]
+                G3["deepseek/ — thinking encoder + session state cache"]
+            end
+        end
+
+        STDIO1(["⇅ JSON-RPC / stdio"])
+        STDIO2(["⇅ Streamable HTTP / MCP"])
+
+        subgraph Core["🦀 tday-core · Rust binary"]
+            C1["Local-inference scanner\nOllama · LM Studio · vLLM · llama.cpp · SGLang"]
+            C2["Token counter — tiktoken-rs / tokenizers"]
+            C3["Memory store — SQLite + sqlite-vec"]
+            C4["Usage logger — per-agent / per-provider / per-tab"]
+            C5["Config & secrets — keyring, OS keychain"]
+        end
+
+        subgraph Native["🦀 tday-nativecore · Rust MCP server · Computer Use"]
+            N1["AX tree — take_ax_snapshot · ax_click · ax_set_value · ax_find"]
+            N2["OCR — find_text (Vision / WinRT OCR / Tesseract, multi-display)"]
+            N3["Mouse / Keyboard — click · type_text · shortcut · scroll · drag"]
+            N4["Screenshot — take_screenshot (all platforms, all displays)"]
+            N5["CDP — probe_app · cdp_connect · cdp_find_elements · cdp_click"]
+            N6["Android ADB — adb_tap · adb_key · adb_screenshot"]
+            N7["Launcher — open_app · sys_process · execute_command · clipboard"]
+        end
+    end
+
+    Renderer <-->|IPC contextBridge| Main
+    Main <-->|spawns| Core
+    Main <-->|spawns| Native
+
+    style Renderer fill:#1e1b4b,stroke:#7c3aed,color:#e2e8f0
+    style Main fill:#1a2e1a,stroke:#16a34a,color:#e2e8f0
+    style Core fill:#1c1917,stroke:#d97706,color:#e2e8f0
+    style Native fill:#1c1917,stroke:#d97706,color:#e2e8f0
+    style GW fill:#0f1629,stroke:#3b82f6,color:#e2e8f0
+    style IPC fill:#374151,stroke:#6b7280,color:#f9fafb
+    style STDIO1 fill:#374151,stroke:#6b7280,color:#f9fafb
+    style STDIO2 fill:#374151,stroke:#6b7280,color:#f9fafb
 ```
 
 ### Why this split
