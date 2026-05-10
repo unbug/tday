@@ -100,6 +100,16 @@ describe('modelFlagsFor', () => {
     const joined = flags.join(' ');
     expect(joined).toContain('model_provider="tday"');
   });
+
+  it('uses codex Responses API and sandbox CLI flag for MCP stability', () => {
+    const flags = modelFlagsFor('codex', 'deepseek-v4-flash', 'deepseek', 'openai', 'http://127.0.0.1:1234/v1');
+    const joined = flags.join(' ');
+    expect(joined).toContain('model_providers.tday.wire_api="responses"');
+    expect(joined).toContain('approval_policy="never"');
+    expect(flags).toContain('--sandbox');
+    expect(flags).toContain('danger-full-access');
+    expect(joined).not.toContain('sandbox="danger-full-access"');
+  });
 });
 
 describe('normalizeLaunchCwd', () => {

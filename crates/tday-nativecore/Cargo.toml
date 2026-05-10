@@ -26,8 +26,11 @@ cdp                 = ["dep:chromiumoxide"]
 # Core dependencies
 # ──────────────────────────────────────────────────────────────────────────────
 [dependencies]
-# MCP SDK (stdio transport)
-rmcp = { version = "0.2", features = ["server", "transport-io", "macros"] }
+# MCP SDK (stdio + HTTP transports)
+rmcp = { version = "0.2", features = ["server", "transport-io", "macros", "transport-streamable-http-server", "transport-worker"] }
+
+# HTTP server (for shared HTTP mode — axum is not re-exported by the rmcp streamable-http feature)
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 
 # Async runtime
 tokio      = { version = "1", features = ["full"] }
@@ -71,6 +74,12 @@ quick-xml  = "0.39"
 chromiumoxide = { version = "0.9", optional = true, default-features = false }
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Unix platform dependencies (macOS + Linux)
+# ──────────────────────────────────────────────────────────────────────────────
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# ──────────────────────────────────────────────────────────────────────────────
 # macOS platform dependencies
 # ──────────────────────────────────────────────────────────────────────────────
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -96,6 +105,7 @@ windows = { version = "0.58", features = [
     "Win32_System_Threading",
     "Win32_System_ProcessStatus",
     "Win32_System_SystemServices",
+    "Win32_System_Diagnostics_ToolHelp",
     "Graphics_Imaging",
     "Media_Ocr",
     "Storage_Streams",

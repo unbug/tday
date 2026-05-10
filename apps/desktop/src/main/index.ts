@@ -68,15 +68,21 @@ import { ptys, shuttingDown, setShuttingDown, killAllPtys } from './pty-manager.
 import {
   isComputerUseEnabled,
   applyClaudeCodeMcp,
+  applyClaudeCodeMcpUrl,
   injectGeminiMcp,
+  injectGeminiMcpUrl,
   injectOpencodeMcp,
-  codexMcpCliArgs,
+  injectOpencodeMcpUrl,
+  codexMcpCliArgsUrl,
   injectPiMcp,
+  injectPiMcpUrl,
   startCodexApiProxy,
+  startMcpSessionProxy,
   writeComputerUseSkillFiles,
   removeComputerUseSkillFiles,
   COMPUTER_USE_SETTING_KEY,
 } from './computer-use.js';
+import { NativecoreService } from './nativecore-service.js';
 import { runNpmGlobal } from './npm-installer.js';
 import { setupPowerMonitor, registerPowerHandlers, stopCaffeinate } from './power-manager.js';
 import { createWindow, watchWindowShortcuts, installAppMenu, mainWindow } from './window.js';
@@ -277,11 +283,27 @@ function registerIpc(): void {
         args = [...args, req.initialPrompt.trim()];
       }
       // Computer Use: inject bridge extension + env
+      // Prefer the shared HTTP server (global RwLock across all agents);
+      // fall back to spawning a private stdio process.
       if (isComputerUseEnabled(getAllSettings(), 'pi')) {
-        const { extensionPath, env: cuEnv, cleanup } = injectPiMcp();
-        Object.assign(env, cuEnv);
-        args = [...args, '--extension', extensionPath];
-        computerUseCleanup = cleanup;
+        let piCuUrl: string | null = null;
+        try {
+          await NativecoreService.addRef();
+          piCuUrl = NativecoreService.getUrl();
+        } catch (e) {
+          console.warn('[tday] NativecoreService unavailable for pi, falling back to stdio:', e);
+        }
+        if (piCuUrl) {
+          const { extensionPath, env: cuEnv } = injectPiMcpUrl(piCuUrl);
+          Object.assign(env, cuEnv);
+          args = [...args, '--extension', extensionPath];
+          computerUseCleanup = () => NativecoreService.release();
+        } else {
+          const { extensionPath, env: cuEnv, cleanup } = injectPiMcp();
+          Object.assign(env, cuEnv);
+          args = [...args, '--extension', extensionPath];
+          computerUseCleanup = cleanup;
+        }
       }
     } else {
       const piLike = PiAdapter.buildLaunch({
@@ -402,7 +424,20 @@ function registerIpc(): void {
             // Only inject ANTHROPIC_BETA for real Anthropic backends; local
             // OAI-compat servers (LM Studio, Ollama…) reject computer_use_20250124.
             const isAnthropicBackend = cp.kind === 'anthropic';
-            applyClaudeCodeMcp(sessionSettings, isAnthropicBackend);
+            // Prefer HTTP service when available; fall back to stdio command.
+            let cuNativecoreUrl: string | null = null;
+            try {
+              await NativecoreService.addRef();
+              cuNativecoreUrl = NativecoreService.getUrl();
+            } catch (e) {
+              console.warn('[tday] NativecoreService unavailable for claude-code, falling back to stdio:', e);
+            }
+            if (cuNativecoreUrl) {
+              applyClaudeCodeMcpUrl(sessionSettings, cuNativecoreUrl, isAnthropicBackend);
+              computerUseCleanup = () => NativecoreService.release();
+            } else {
+              applyClaudeCodeMcp(sessionSettings, isAnthropicBackend);
+            }
             // MCP servers must be passed via --mcp-config (not --settings) for
             // claude-code to register them before the session starts.
             const mcpServers = sessionSettings.mcpServers;
@@ -469,7 +504,20 @@ function registerIpc(): void {
           mkdirSync(claudeDir, { recursive: true });
           const sessionSettings: Record<string, unknown> = {};
           // No effectiveProvider: default Anthropic backend.
-          applyClaudeCodeMcp(sessionSettings, true);
+          // Prefer HTTP service; fall back to stdio command.
+          let cuUrl: string | null = null;
+          try {
+            await NativecoreService.addRef();
+            cuUrl = NativecoreService.getUrl();
+          } catch (e) {
+            console.warn('[tday] NativecoreService unavailable for claude-code (no provider), falling back to stdio:', e);
+          }
+          if (cuUrl) {
+            applyClaudeCodeMcpUrl(sessionSettings, cuUrl, true);
+            computerUseCleanup = () => NativecoreService.release();
+          } else {
+            applyClaudeCodeMcp(sessionSettings, true);
+          }
           // MCP servers via --mcp-config; rest (permissions, env, customInstructions) via --settings.
           const mcpServers = sessionSettings.mcpServers;
           delete sessionSettings.mcpServers;
@@ -479,9 +527,12 @@ function registerIpc(): void {
           }
           writeFileSync(sessionSettingsPath, JSON.stringify(sessionSettings, null, 2), 'utf8');
           args = ['--settings', sessionSettingsPath, ...args];
+          const cuCleanup = computerUseCleanup;
           claudeSettingsRestore = () => {
             try { unlinkSync(mcpConfigPath); } catch { /* ok */ }
             try { unlinkSync(sessionSettingsPath); } catch { /* ok */ }
+            cuCleanup?.();
+            computerUseCleanup = null;
           };
         } catch (e) {
           console.warn('[tday] could not set up claude-code Computer Use session settings:', e);
@@ -495,36 +546,85 @@ function registerIpc(): void {
       // ── Computer Use: inject MCP for agents with global config files ──────
       if (isComputerUseEnabled(getAllSettings(), req.agentId)) {
         if (req.agentId === 'gemini') {
-          computerUseCleanup = injectGeminiMcp();
+          // Prefer shared HTTP service; fall back to per-session stdio spawn.
+          let cuUrl: string | null = null;
+          try {
+            await NativecoreService.addRef();
+            cuUrl = NativecoreService.getUrl();
+          } catch (e) {
+            console.warn('[tday] NativecoreService unavailable for gemini, falling back to stdio:', e);
+          }
+          if (cuUrl) {
+            const cleanup = injectGeminiMcpUrl(cuUrl);
+            computerUseCleanup = () => { cleanup(); NativecoreService.release(); };
+          } else {
+            computerUseCleanup = injectGeminiMcp();
+          }
         } else if (req.agentId === 'opencode') {
-          computerUseCleanup = injectOpencodeMcp();
+          // Prefer shared HTTP service; fall back to per-session stdio spawn.
+          let cuUrl: string | null = null;
+          try {
+            await NativecoreService.addRef();
+            cuUrl = NativecoreService.getUrl();
+          } catch (e) {
+            console.warn('[tday] NativecoreService unavailable for opencode, falling back to stdio:', e);
+          }
+          if (cuUrl) {
+            const cleanup = injectOpencodeMcpUrl(cuUrl);
+            computerUseCleanup = () => { cleanup(); NativecoreService.release(); };
+          } else {
+            computerUseCleanup = injectOpencodeMcp();
+          }
         } else if (req.agentId === 'codex') {
           // codex wraps MCP tools as type:"namespace" which third-party providers
           // (DeepSeek, LM Studio, …) don't support.  When a base URL is configured
           // we insert a local proxy that expands namespace tools → flat functions
           // on the request path and converts flat function-call names back to the
           // namespace+name split on the response path.
-          // Inject the MCP server via -c args (ephemeral, never touches ~/.codex/config.toml)
-          args.push(...codexMcpCliArgs());
+          //
+          // MCP transport: shared HTTP NativecoreService + per-session
+          // MCP session-keepalive proxy.  The proxy transparently maintains the
+          // Mcp-Session-Id that codex's rmcp client drops, so codex always sees
+          // a healthy session.  Falls back to stdio if the shared service fails.
+          let mcpProxyStop: (() => void) | undefined;
+          try {
+            await NativecoreService.addRef();
+            const nativecoreUrl = NativecoreService.getUrl();
+            if (!nativecoreUrl) throw new Error('NativecoreService not ready');
+            const mcpProxy = await startMcpSessionProxy(nativecoreUrl);
+            mcpProxyStop = mcpProxy.stop;
+            // codex MCP URL = proxy base + the /mcp path that nativecore serves
+            args.push(...codexMcpCliArgsUrl(mcpProxy.proxyBaseUrl + '/mcp'));
+            computerUseCleanup = () => { mcpProxyStop?.(); NativecoreService.release(); };
+          } catch (e) {
+            console.warn('[tday] NativecoreService/MCP proxy unavailable for codex, falling back to stdio:', e);
+            // stdio fallback: private nativecore per session, no session management needed
+            const { codexMcpCliArgs } = await import('./computer-use.js');
+            args.push(...codexMcpCliArgs());
+            computerUseCleanup = () => { /* stdio process exits with codex */ };
+          }
+          // Exclude loopback from system proxy (Clash, VPN, etc.) so codex's
+          // reqwest client reaches the local proxies directly.
+          appendNoProxy(env, ['127.0.0.1', 'localhost', '::1']);
 
           const cuBaseUrl = gatewayResolution?.baseUrl ?? effectiveProvider?.baseUrl;
-          let proxyStop: (() => void) | undefined;
           if (cuBaseUrl) {
             try {
-              const proxy = await startCodexApiProxy(cuBaseUrl);
-              proxyStop = proxy.stop;
+              const apiProxy = await startCodexApiProxy(cuBaseUrl);
+              const apiProxyStop = apiProxy.stop;
               // Replace the base_url in the already-built args so codex hits the proxy.
               for (let i = 0; i < args.length - 1; i++) {
                 if (args[i] === '-c' && (args[i + 1] as string).startsWith('model_providers.tday.base_url=')) {
-                  args[i + 1] = `model_providers.tday.base_url="${proxy.proxyBaseUrl}"`;
+                  args[i + 1] = `model_providers.tday.base_url="${apiProxy.proxyBaseUrl}"`;
                   break;
                 }
               }
+              const prevCleanup = computerUseCleanup;
+              computerUseCleanup = () => { prevCleanup?.(); apiProxyStop(); };
             } catch (e) {
               console.warn('[tday] could not start codex namespace-tool proxy:', e);
             }
           }
-          computerUseCleanup = () => { proxyStop?.(); };
         }
         // claude-code is handled above inside the per-session settings block
       }

@@ -528,6 +528,20 @@ Windows and Linux now have full feature parity with macOS Computer Use — same 
 - [x] **`session/ax_session.rs`** — `#[cfg(target_os = "macos")]` → `#[cfg(any(macos, windows, linux))]`
 - [x] **`handlers/probe_app.rs`**, **`tracking/hover_tracker.rs`**, **`tracking/screen_recorder.rs`** — same cfg expansion
 - [x] **CI** — `.github/workflows/release.yml` re-enables `windows-2022` and `ubuntu-22.04` matrix; Linux apt installs `libgtk-3-dev libx11-dev libxrandr-dev libxtst-dev` and packaging tools
+- [x] **Shared `tday-nativecore` HTTP MCP server** (`NativecoreService`) — single long-lived process shared across all Computer Use sessions:
+  - [x] `nativecore-service.ts` — ref-counted singleton; lazy 60 s kill after last release; `NATIVECORE_PORT:N` stdout parsing
+  - [x] `parent_watch.rs` — Rust watchdog: SIGTERM self when parent PID exits (prevents zombie nativecore on crash)
+  - [x] `singleton.rs` — port-file locking prevents duplicate nativecore processes
+- [x] **MCP session proxy** (`startMcpSessionProxy`) — per-session Node.js HTTP proxy managing `Mcp-Session-Id`:
+  - [x] Transparent `initialize` / `notifications/initialized` handshake with nativecore (rmcp 0.2.1 Streamable HTTP)
+  - [x] Auto re-initialize on HTTP 401 (session expired) or 422 (no session context) and replay original request
+  - [x] Caches `initialize` + `notifications/initialized` bodies for re-init replay
+  - [x] Correct `content-length` header for HTTP keep-alive compatibility
+- [x] **Codex namespace-tool proxy fix** (`startCodexApiProxy`):
+  - [x] `expandNamespaceTools` builds `shortToFlatMcpName` map while expanding `type:"namespace"` → flat `type:"function"` tools
+  - [x] `splitFlatMcpName` resolves bare tool names (e.g. `list_apps`) the model calls from SKILL text back to `{namespace, name}` for codex router
+  - [x] Fixes `error=unsupported call: list_apps` for all 76 nativecore tools
+- [x] **76-tool nativecore** — expanded from 20+ to 76 MCP tools covering CDP (30+ tools), Android ADB (12 tools), App Protocol (WebSocket), hover tracking, screen recording, extended AX (`ax_find`, `ax_focused`, `click_text`, `element_at_point`), window management (`resize_window`, `quit_app`), system tools (`sys_process`, `sys_wait`, `execute_command`, `filesystem`, `clipboard`, `scrape`)
 
 ### v0.10.x — Web Search & Web Tools
 Give every agent instant access to the live web — configure search providers in Settings and inject them as MCP tools per agent.

@@ -258,10 +258,10 @@ export function ComputerUseSection() {
                 group: 'CDP — Chrome / Electron apps', color: 'bg-orange-500',
                 tools: [
                   { name: 'cdp_connect',       desc: 'Connect to a Chrome DevTools endpoint (port from probe_app)' },
-                  { name: 'cdp_find_elements', desc: 'Query elements via CSS selector or text — returns [{id, tag, text, rect}]' },
-                  { name: 'cdp_click',         desc: 'Click a DOM element by CDP element id' },
-                  { name: 'cdp_fill',          desc: 'Fill an input field by element id' },
-                  { name: 'cdp_evaluate',      desc: 'Execute arbitrary JavaScript in the page context' },
+                  { name: 'cdp_find_elements', desc: 'Query elements by text — returns DOM nodes with uid values' },
+                  { name: 'cdp_click',         desc: 'Click a DOM element by uid' },
+                  { name: 'cdp_fill',          desc: 'Fill an input field by uid' },
+                  { name: 'cdp_evaluate_script', desc: 'Execute arbitrary JavaScript in the page context' },
                 ],
               },
               {

@@ -13,7 +13,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import * as http from 'node:http';
 import * as https from 'node:https';
@@ -64,7 +64,7 @@ Need to interact with a specific element in a running app?
   │
   ├─ 2nd — ax_focused               ← if element is already focused; 1-node response
   │
-  ├─ 3rd — take_ax_snapshot         ← full tree; only when you need to explore unknown UI
+  ├─ 3rd — take_ax_snapshot {max_depth: 3}  ← shallow first look (fast); re-run without max_depth only if needed
   │         Then: ax_click / ax_set_value / ax_select / ax_perform_action
   │
   ├─ 4th — Visual + Mouse/Keyboard (universal fallback when AX gives empty tree):
@@ -80,7 +80,9 @@ Need to interact with a specific element in a running app?
 > \`ax_find\`, or \`get_page_content\` instead.
 >
 > ⚠️ **Prefer \`ax_find\` over \`take_ax_snapshot\`** when you know what you're looking for.
-> \`take_ax_snapshot\` returns up to 10,000 nodes; \`ax_find\` returns only the matching ones.
+> \`ax_find\` stops walking as soon as \`max_results\` is reached; \`take_ax_snapshot\` always
+> traverses the full tree (up to 10,000 nodes).  If you must snapshot an unknown UI,
+> start with \`max_depth: 3\` and drill deeper only when needed.
 
 ## Core tools reference
 
@@ -94,8 +96,8 @@ Need to interact with a specific element in a running app?
 | Tool | Cost | When to use |
 |------|------|-------------|
 | \`ax_focused\` | **Cheapest** (1 element) | Interact with currently focused element — active text field, button, etc. |
-| \`ax_find\` | **Targeted** (matching elements only) | Find specific buttons/fields/items by text or role. Much smaller than full snapshot. |
-| \`take_ax_snapshot\` | **Full tree** (up to 10k nodes) | Explore unknown UI structure when you don't know what's there |
+| \`ax_find\` | **Targeted** (matching elements only, early-exit walk) | Find specific buttons/fields/items by text or role. Much smaller than full snapshot. |
+| \`take_ax_snapshot\` | **Full tree** (up to 10k nodes) | Explore unknown UI structure when you don't know what's there. Use \`max_depth: 3\` first for a quick overview. |
 | \`ax_click\` | — | Click element by uid from ax_find / ax_focused / snapshot |
 | \`ax_set_value\` | — | Type into text field by uid (no coordinates needed) |
 | \`ax_select\` | — | Select/open menu item, tab, or list row by uid |
@@ -132,20 +134,20 @@ Need to interact with a specific element in a running app?
 |------|-------|
 | \`probe_app\` | Returns \`{kind: "Electron"|"Chrome"|"Native"}\` and debug port. Run this first |
 | \`cdp_connect\` | Connect to the debug port returned by probe_app |
-| \`cdp_find_elements\` | CSS selector / text search. Returns \`[{id, tag, text, rect}]\` |
-| \`cdp_click\` | Click element by id. More reliable than pixel coords in web UIs |
-| \`cdp_fill\` | Fill an input field by element id |
-| \`cdp_evaluate\` | Run arbitrary JS in the page |
+| \`cdp_find_elements\` | Text/CSS-like query search. Returns elements with \`uid\` values |
+| \`cdp_click\` | Click element by \`uid\`. More reliable than pixel coords in web UIs |
+| \`cdp_fill\` | Fill an input field by \`uid\` |
+| \`cdp_evaluate_script\` | Run arbitrary JS in the page |
 
 ### System utilities
 | Tool | Notes |
 |------|-------|
 | \`execute_command\` | Run shell commands (\`mode: "shell"\`) or AppleScript (\`mode: "osascript"\`) |
 | \`clipboard\` | \`mode: "get"\` / \`mode: "set"\` — read or write clipboard text (macOS, Windows, Linux) |
-| \`process\` | List/kill processes |
+| \`sys_process\` | List/kill processes |
 | \`filesystem\` | Read, write, list, search files — use instead of shell when the path is known |
 | \`scrape\` | Fetch a URL and return its body as text |
-| \`wait\` | Pause between actions. Use after launching apps or triggering animations (\`duration: 0.5\`–\`2\`) |
+| \`sys_wait\` | Pause between actions. Use after launching apps or triggering animations (\`duration: 0.5\`–\`2\`) |
 
 ### Android (requires connected device via ADB)
 Use \`android_list_devices\` first, then \`android_connect\`.
@@ -184,7 +186,7 @@ ax_set_value { uid: "a5g3", value: "my query" }
 \`\`\`
 1. list_apps                               // check if already running
 2. launch_app {app_name}                   // if not running
-3. wait {duration: 1}                      // let the window appear
+3. sys_wait {duration: 1}                  // let the window appear
 4. ax_find {role: "button", text: "Login"} // targeted search — NOT full snapshot
    OR click_text {text: "Login"}           // even simpler
 5. ax_click {uid}  OR  click_text          // interact
@@ -195,9 +197,9 @@ ax_set_value { uid: "a5g3", value: "my query" }
 \`\`\`
 1. probe_app {app_name}               // get debug port
 2. cdp_connect {port}                 // establish CDP session
-3. cdp_find_elements {selector/text}  // locate input fields
-4. cdp_fill {id, value}               // fill each field
-5. cdp_click {submit button id}       // submit
+3. cdp_find_elements {query: "..."}   // locate input fields
+4. cdp_fill {uid, value}              // fill each field
+5. cdp_click {uid}                    // submit
 6. find_text {text: "success"}        // verify — avoid screenshot
 \`\`\`
 
@@ -208,14 +210,32 @@ shortcut {shortcut: "ctrl+s"}             // Save (Windows/Linux)
 shortcut {shortcut: "command+shift+p"}    // VS Code command palette
 \`\`\`
 
+**Explore unknown UI structure (when ax_find / click_text are not enough)**
+\`\`\`
+// Step 1 — shallow snapshot first: fast, small response
+take_ax_snapshot { max_depth: 3 }
+// → tree with ~3 levels; identify the region / container you need
+
+// Step 2 — if you found the element → act immediately
+ax_click { uid: "a7g3" }
+// OR if the subtree is still incomplete, narrow down and go deeper:
+
+// Step 3 — try ax_find on what you found
+ax_find { text: "Save", role: "button" }
+// → only returns matching nodes, much smaller than full tree
+
+// Step 4 — full snapshot only if absolutely necessary
+take_ax_snapshot {}          // no max_depth → full tree (up to 10k nodes)
+\`\`\`
+
 ## Reliability rules
 - **\`get_page_content\` to read text** — fastest, zero permissions, works in any app.
 - **\`click_text\` to click by label** — single call, no need to look up coordinates first.
-- **\`ax_focused\` or \`ax_find\` before \`take_ax_snapshot\`** — always try the targeted query first; only fall back to a full snapshot when you need to explore unknown UI.
+- **\`ax_focused\` or \`ax_find\` before \`take_ax_snapshot\`** — always try targeted queries first; if you must snapshot use \`max_depth: 3\` first, then remove the limit only when you need to go deeper.
 - **Never screenshot as first step** — use \`find_text\`, \`ax_find\`, or \`get_page_content\` first.
 - **Verify cheaply** — check with \`find_text\` or an AX value query. Only escalate to screenshot if needed.
 - **Prefer uid-based AX actions over pixel clicks** — AX uids survive window moves; coordinates don't.
-- **Use \`wait\`** after launching apps, opening dialogs, or triggering animations before the next action.
+- **Use \`sys_wait\`** after launching apps, opening dialogs, or triggering animations before the next action.
 - **If \`take_screenshot\` returns black/blank**: Screen Recording permission is missing. Direct the user to: System Settings → Privacy & Security → Screen Recording.
 `.trim();
 
@@ -246,6 +266,8 @@ function removeSkillFile(filePath: string): void {
  */
 function patchOpencodeInstructions(configFilePath: string, skillFilePath: string, add: boolean): void {
   try {
+    if (!add && !existsSync(configFilePath)) return;
+    mkdirSync(dirname(configFilePath), { recursive: true });
     let doc: Record<string, unknown> = {};
     try { doc = JSON.parse(readFileSync(configFilePath, 'utf8')) as Record<string, unknown>; } catch { /* new or missing */ }
     let instructions: string[] = Array.isArray(doc['instructions']) ? (doc['instructions'] as string[]) : [];
@@ -327,7 +349,7 @@ export interface OpencodeMcpEntry {
 }
 
 /** Returns the absolute path to the bundled `tday-nativecore` binary. */
-function devToolsBinaryPath(): string {
+export function devToolsBinaryPath(): string {
   const exe = process.platform === 'win32' ? 'tday-nativecore.exe' : 'tday-nativecore';
   // `app` may be undefined when running in a Node.js test environment (vitest).
   if (typeof app !== 'undefined' && app?.isPackaged) {
@@ -345,6 +367,66 @@ export function buildMcpEntry(): McpEntry {
 /** Returns the MCP server definition for tday-nativecore (opencode format). */
 export function buildOpencodeMcpEntry(): OpencodeMcpEntry {
   return { type: 'local', command: [devToolsBinaryPath()], enabled: true };
+}
+
+// ── URL-based MCP entry types (for HTTP / streamable-http transport) ──────────
+
+/**
+ * MCP entry used when the nativecore is running as a shared HTTP server.
+ * Claude Code uses the MCP spec field name `type` (not `transport`) to
+ * identify streamable-HTTP servers.  Passing `transport` causes claude-code
+ * to fall back to the stdio schema and report
+ * "command: expected string, received undefined".
+ */
+export interface McpEntryUrl {
+  url: string;
+  type: 'http';
+}
+
+/**
+ * Gemini CLI only accepts `{ url }` — any extra key (type, transport, …)
+ * triggers "Unrecognized key(s)" validation errors.  Keep this type separate
+ * from McpEntryUrl so callers can't accidentally mix them up.
+ */
+export interface GeminiMcpEntryUrl {
+  url: string;
+}
+
+/** opencode format for a remote MCP server. */
+export interface OpencodeMcpEntryUrl {
+  type: 'remote';
+  url: string;
+  enabled: boolean;
+}
+
+/**
+ * Returns a URL-based MCP entry for claude-code settings (streamable HTTP).
+ * Uses `type: 'http'` per the MCP spec — claude-code requires this exact key.
+ * Do NOT use this for Gemini; Gemini requires a different format (url only).
+ */
+export function buildMcpEntryUrl(url: string): McpEntryUrl {
+  return { type: 'http', url };
+}
+
+/**
+ * Returns a URL-based MCP entry for Gemini CLI settings.
+ * Gemini only accepts `{ url }` — any extra key causes a validation error.
+ */
+export function buildGeminiMcpEntryUrl(url: string): GeminiMcpEntryUrl {
+  return { url };
+}
+
+/** Returns a URL-based MCP entry for opencode (remote server). */
+export function buildOpencodeMcpEntryUrl(url: string): OpencodeMcpEntryUrl {
+  return { type: 'remote', url, enabled: true };
+}
+
+/**
+ * Returns the codex `-c` args to configure a remote MCP server by URL.
+ * Example: `-c mcp_servers.tday-computer-use.url=http://127.0.0.1:PORT/mcp`
+ */
+export function codexMcpCliArgsUrl(url: string): string[] {
+  return ['-c', `mcp_servers.${MCP_SERVER_KEY}.url=${url}`];
 }
 
 // ── claude-code injection (per-session, no cleanup needed) ───────────────────
@@ -385,6 +467,46 @@ export function applyClaudeCodeMcp(sessionSettings: Record<string, unknown>, isA
   // Enable the computer-use beta so image tool_results are accepted by the API.
   // Skip for non-Anthropic backends: they don't understand computer_use_20250124
   // tool types and reject the request with "tools.N.type invalid_string".
+  if (isAnthropicBackend) {
+    const env = (sessionSettings.env as Record<string, string>) ?? {};
+    const existingBeta = env['ANTHROPIC_BETA'] ?? '';
+    const betaFlag = 'computer-use-2025-01-30';
+    if (!existingBeta.split(',').map((s) => s.trim()).includes(betaFlag)) {
+      env['ANTHROPIC_BETA'] = existingBeta ? `${existingBeta},${betaFlag}` : betaFlag;
+    }
+    sessionSettings.env = env;
+  }
+}
+
+/**
+ * URL variant of applyClaudeCodeMcp — uses an HTTP transport MCP entry.
+ * Call this when NativecoreService is running in HTTP mode.
+ */
+export function applyClaudeCodeMcpUrl(
+  sessionSettings: Record<string, unknown>,
+  url: string,
+  isAnthropicBackend = true,
+): void {
+  const existing = (sessionSettings.mcpServers as Record<string, unknown>) ?? {};
+  sessionSettings.mcpServers = { ...existing, [MCP_SERVER_KEY]: buildMcpEntryUrl(url) };
+
+  // Inject skill as custom instructions.
+  const existingInstructions = typeof sessionSettings.customInstructions === 'string'
+    ? sessionSettings.customInstructions : '';
+  if (!existingInstructions.includes(MCP_SERVER_KEY)) {
+    sessionSettings.customInstructions = existingInstructions
+      ? `${existingInstructions}\n\n${COMPUTER_USE_SKILL}`
+      : COMPUTER_USE_SKILL;
+  }
+
+  // Auto-allow all computer-use tool calls.
+  const existingPerms = (sessionSettings.permissions as { allow?: string[]; deny?: string[] } | undefined) ?? {};
+  const allowList = existingPerms.allow ?? [];
+  const toolGlob = `mcp__${MCP_SERVER_KEY}__*`;
+  if (!allowList.includes(toolGlob)) {
+    sessionSettings.permissions = { ...existingPerms, allow: [...allowList, toolGlob] };
+  }
+
   if (isAnthropicBackend) {
     const env = (sessionSettings.env as Record<string, string>) ?? {};
     const existingBeta = env['ANTHROPIC_BETA'] ?? '';
@@ -522,6 +644,18 @@ export function injectGeminiMcp(home?: string): () => void {
 }
 
 /**
+ * Inject a URL-based (HTTP transport) MCP entry into `~/.gemini/settings.json`.
+ * Use this when NativecoreService is running in HTTP mode.
+ * Returns a cleanup function; must be called when the PTY exits.
+ */
+export function injectGeminiMcpUrl(url: string, home?: string): () => void {
+  const dir = join(home ?? homedir(), '.gemini');
+  const filePath = join(dir, 'settings.json');
+  // Gemini CLI only accepts { url } — no type/transport field allowed.
+  return injectMcpToFile(filePath, dir, 'mcpServers', buildGeminiMcpEntryUrl(url) as unknown as Record<string, unknown>);
+}
+
+/**
  * Inject MCP into opencode's config file.
  * Path: $XDG_CONFIG_HOME/opencode/opencode.json  (default: ~/.config/opencode/opencode.json)
  * Returns a cleanup function; must be called when the PTY exits.
@@ -540,10 +674,23 @@ export function injectOpencodeMcp(home?: string): () => void {
 }
 
 /**
- * Inject MCP into codex's config (~/.codex/config.toml).
- * Format: [mcp_servers.<name>]  /  command = "<path>"
+ * Inject a URL-based MCP entry into opencode's config file (remote server).
+ * Use this when NativecoreService is running in HTTP mode.
  * Returns a cleanup function; must be called when the PTY exits.
  */
+export function injectOpencodeMcpUrl(url: string, home?: string): () => void {
+  const xdgBase = process.env['XDG_CONFIG_HOME'] ?? join(home ?? homedir(), '.config');
+  const dir = join(xdgBase, 'opencode');
+  const filePath = join(dir, 'opencode.json');
+  // opencode schema (remote): { mcp: { "<name>": { type: "remote", url: "...", enabled: true } } }
+  return injectMcpToFile(
+    filePath,
+    dir,
+    'mcp',
+    buildOpencodeMcpEntryUrl(url) as unknown as Record<string, unknown>,
+  );
+}
+
 /**
  * Return the `-c` args needed to inject the Computer Use MCP server into a
  * codex invocation.  Codex supports arbitrary config overrides via
@@ -624,10 +771,10 @@ export function removeComputerUseSkillFiles(home?: string): void {
 
 /** Absolute path to the pi MCP bridge extension TypeScript file. */
 function bridgeExtensionPath(): string {
-  if (app.isPackaged) {
+  if (typeof app !== 'undefined' && app?.isPackaged) {
     return join(process.resourcesPath, 'pi-computer-use-bridge.ts');
   }
-  // Dev: source tree relative to the compiled main output directory
+  // Dev / test environment: source tree relative to the compiled main output directory
   return join(__dirname, '../../resources/pi-computer-use-bridge.ts');
 }
 
@@ -635,12 +782,28 @@ function bridgeExtensionPath(): string {
  * Returns the `--extension` path and the required env var for pi Computer Use.
  * Call when spawning pi with Computer Use enabled; the returned cleanup is a no-op
  * (no external config file is mutated — the bridge is an ephemeral extension arg).
+ *
+ * Stdio fallback: the bridge spawns its own private nativecore process.
  */
 export function injectPiMcp(): { extensionPath: string; env: Record<string, string>; cleanup: () => void } {
   return {
     extensionPath: bridgeExtensionPath(),
     env: { TDAY_DEVTOOLS_BIN: devToolsBinaryPath() },
     cleanup: () => { /* no persistent mutation — no cleanup needed */ },
+  };
+}
+
+/**
+ * URL variant of injectPiMcp — uses the shared HTTP nativecore server.
+ * The bridge reads TDAY_DEVTOOLS_URL and connects over HTTP instead of
+ * spawning its own stdio process, so all pi sessions share the global RwLock.
+ *
+ * Cleanup is a no-op here; the caller in index.ts calls NativecoreService.release().
+ */
+export function injectPiMcpUrl(url: string): { extensionPath: string; env: Record<string, string> } {
+  return {
+    extensionPath: bridgeExtensionPath(),
+    env: { TDAY_DEVTOOLS_URL: url },
   };
 }
 
@@ -669,10 +832,27 @@ export function isComputerUseEnabled(
 //                  providers that don't support the namespace type can still call them.
 //   RESPONSE side: converts the flat `mcp__ns__tool` function-call names back to
 //                  the `{namespace, name}` split that codex uses for MCP routing.
+//
+// Short-name fallback: the model may call tools by their bare names (e.g. "list_apps")
+// instead of the fully-qualified flat name ("mcp__tday_computer_use__list_apps").
+// We build a shortName→flatName map while expanding namespace tools and use it on
+// the response side to resolve bare names into the namespace+name split that codex
+// expects for routing.
+
+/**
+ * Persistent map from bare tool name (e.g. "list_apps") to the fully-qualified
+ * flat MCP name (e.g. "mcp__tday_computer_use__list_apps").  Populated by
+ * expandNamespaceTools on every request that carries namespace tool definitions.
+ * The proxy is long-lived and the tool list is stable, so a module-level map works.
+ */
+const shortToFlatMcpName = new Map<string, string>();
 
 /**
  * Transform a parsed request body: expand `type:"namespace"` tool entries into
  * individual flat `type:"function"` entries.  All non-namespace entries pass through.
+ * As a side-effect, populates `shortToFlatMcpName` so that the response side can
+ * resolve bare tool names (used by the model when following SKILL-text instructions)
+ * back to their fully-qualified flat names.
  */
 function expandNamespaceTools(body: unknown): unknown {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return body;
@@ -688,7 +868,11 @@ function expandNamespaceTools(body: unknown): unknown {
       const subTools = (tool.tools as Array<Record<string, unknown>>) ?? [];
       for (const sub of subTools) {
         if (sub.type === 'function') {
-          flat.push({ ...sub, name: `${nsName}${sub.name as string}` });
+          const shortName = sub.name as string;
+          const flatName  = `${nsName}${shortName}`;
+          flat.push({ ...sub, name: flatName });
+          // Remember bare name → flat name so patchFunctionCallItem can resolve it.
+          shortToFlatMcpName.set(shortName, flatName);
         } else {
           flat.push({ ...sub });
         }
@@ -704,10 +888,20 @@ function expandNamespaceTools(body: unknown): unknown {
  * Given a flat function-call name like "mcp__tday_computer_use__take_screenshot",
  * returns { namespace: "mcp__tday_computer_use__", name: "take_screenshot" } when
  * the name starts with "mcp__" and contains at least two "__" separators.
- * Returns null for all other names (they pass through unchanged).
+ *
+ * Also handles bare tool names (e.g. "take_screenshot") that the model may produce
+ * when following SKILL-text instructions instead of the tool definitions: resolves
+ * them via `shortToFlatMcpName` and then splits the resulting flat name.
+ *
+ * Returns null for names that cannot be resolved (they pass through unchanged).
  */
 function splitFlatMcpName(flatName: string): { namespace: string; name: string } | null {
-  if (!flatName.startsWith('mcp__')) return null;
+  if (!flatName.startsWith('mcp__')) {
+    // Bare name fallback: look up in the short→flat map built from namespace tools.
+    const resolved = shortToFlatMcpName.get(flatName);
+    if (!resolved) return null;
+    return splitFlatMcpName(resolved); // recurse with the fully-qualified name
+  }
   const lastDunder = flatName.lastIndexOf('__');
   if (lastDunder <= 4) return null;          // nothing after the first "mcp__"
   const namespace = flatName.substring(0, lastDunder + 2); // include trailing __
@@ -739,7 +933,7 @@ function patchResponseEvent(data: unknown): unknown {
     if (patched !== ev.item) return { ...ev, item: patched };
   }
 
-  // response.done  →  ev.response.output[]
+  // response.done SSE event  →  ev.response.output[]
   if (ev.response && typeof ev.response === 'object') {
     const resp = ev.response as Record<string, unknown>;
     if (Array.isArray(resp.output)) {
@@ -750,6 +944,15 @@ function patchResponseEvent(data: unknown): unknown {
     }
   }
 
+  // Non-streaming full Responses API body  →  ev.output[]
+  // (gateway returns {output:[...]} when stream:false)
+  if (Array.isArray(ev.output)) {
+    const patchedOutput = ev.output.map((item: unknown) =>
+      patchFunctionCallItem(item as Record<string, unknown>));
+    const changed = patchedOutput.some((item, i) => item !== (ev.output as unknown[])[i]);
+    if (changed) return { ...ev, output: patchedOutput };
+  }
+
   return data;
 }
 
@@ -758,7 +961,278 @@ const codexProxyCache = new Map<string, {
   proxyBaseUrl: string;
   refCount: number;
   server: http.Server;
+  upstreamOrigin: string;
 }>();
+
+/** Per-origin keepalive agents so the proxy reuses TCP connections to LM Studio / DeepSeek. */
+type ProxyAgent = http.Agent | https.Agent;
+const proxyAgents = new Map<string, { agent: ProxyAgent; refCount: number }>();
+const CODEX_PROXY_HEADERS_TIMEOUT_MS = 30_000;
+const CODEX_PROXY_SSE_IDLE_TIMEOUT_MS = 90_000;
+const CODEX_PROXY_JSON_TIMEOUT_MS = 120_000;
+
+function acquireProxyAgent(origin: string): ProxyAgent {
+  const cached = proxyAgents.get(origin);
+  if (cached) {
+    cached.refCount++;
+    return cached.agent;
+  }
+  const agent = origin.startsWith('https')
+    ? new https.Agent({ keepAlive: true, maxSockets: 4 })
+    : new http.Agent({ keepAlive: true, maxSockets: 4 });
+  proxyAgents.set(origin, { agent, refCount: 1 });
+  return agent;
+}
+
+function releaseProxyAgent(origin: string): void {
+  const entry = proxyAgents.get(origin);
+  if (!entry) return;
+  entry.refCount--;
+  if (entry.refCount > 0) return;
+  proxyAgents.delete(origin);
+  entry.agent.destroy();
+}
+
+function writeProxyError(
+  clientRes: http.ServerResponse,
+  status: number,
+  phase: string,
+  message: string,
+  retryable = true,
+): void {
+  if (clientRes.writableEnded) return;
+  if (!clientRes.headersSent) {
+    clientRes.writeHead(status, { 'content-type': 'application/json' });
+    clientRes.end(JSON.stringify({ error: message, phase, retryable }));
+  } else {
+    clientRes.end();
+  }
+}
+
+// ── MCP Session-Keepalive Proxy (for codex HTTP MCP) ─────────────────────────
+//
+// Codex's Rust rmcp HTTP client (≤ v0.130.x) does not reliably carry the
+// Mcp-Session-Id header across tool calls.  This proxy sits between codex
+// and the shared NativecoreService HTTP server and fixes the problem
+// transparently:
+//
+//   1. Intercepts the MCP initialize handshake, caches the assigned session ID.
+//   2. On every subsequent POST request lacking Mcp-Session-Id: injects it.
+//   3. On HTTP 422 from nativecore (session expired / process restarted):
+//      re-initializes the session then replays the original request — codex
+//      never sees the error.
+//
+// Each codex session gets its own proxy instance so session IDs are isolated.
+
+/**
+ * Start a per-session MCP session-keepalive proxy for codex.
+ *
+ * @param nativecoreOrigin - HTTP origin of the shared nativecore,
+ *   e.g. "http://127.0.0.1:8765" (no path).
+ * @returns proxyBaseUrl (e.g. "http://127.0.0.1:PROXY_PORT") and stop().
+ *   Pass `proxyBaseUrl + "/mcp"` to codexMcpCliArgsUrl().
+ */
+export function startMcpSessionProxy(
+  nativecoreOrigin: string,
+): Promise<{ proxyBaseUrl: string; stop: () => void }> {
+  let sessionId: string | null = null;
+  let cachedInitBody: Buffer | null = null;
+  /** Body of the `notifications/initialized` message from codex — replayed after re-init. */
+  let cachedInitializedBody: Buffer | null = null;
+
+  const upstreamAgent = new http.Agent({ keepAlive: true, maxSockets: 2 });
+
+  /**
+   * Forward one buffered POST to nativecore and return the full buffered
+   * response.  Used for initialize + tool-call requests where we may need
+   * to re-issue on 422.
+   */
+  const forwardBuffered = (
+    method: string,
+    path: string,
+    reqHeaders: Record<string, string>,
+    body: Buffer,
+  ): Promise<{ status: number; resHeaders: http.IncomingHttpHeaders; body: Buffer }> =>
+    new Promise((resolve, reject) => {
+      const targetUrl = `${nativecoreOrigin}${path}`;
+      const req = http.request(
+        targetUrl,
+        {
+          method,
+          headers: { ...reqHeaders, 'content-length': String(body.length) },
+          agent: upstreamAgent,
+        },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c: Buffer) => chunks.push(c));
+          res.on('end', () =>
+            resolve({ status: res.statusCode ?? 200, resHeaders: res.headers, body: Buffer.concat(chunks) }),
+          );
+          res.on('error', reject);
+        },
+      );
+      req.on('error', reject);
+      if (body.length > 0) req.write(body);
+      req.end();
+    });
+
+  const server = http.createServer((clientReq, clientRes) => {
+    const bodyChunks: Buffer[] = [];
+    clientReq.on('data', (c: Buffer) => bodyChunks.push(c));
+    clientReq.on('error', (err) => console.warn('[tday-mcp-proxy] client error:', err.message));
+    clientReq.on('end', async () => {
+      const rawBody = Buffer.concat(bodyChunks);
+      const reqPath = clientReq.url ?? '/';
+      const method = (clientReq.method ?? 'POST').toUpperCase();
+
+      // Build forwarding headers — strip hop-by-hop headers
+      const fwdHeaders: Record<string, string> = {};
+      for (const [k, v] of Object.entries(clientReq.headers)) {
+        const lk = k.toLowerCase();
+        if (['connection', 'transfer-encoding', 'upgrade', 'keep-alive', 'host'].includes(lk)) continue;
+        fwdHeaders[lk] = Array.isArray(v) ? v.join(', ') : (v ?? '');
+      }
+      fwdHeaders['host'] = new URL(nativecoreOrigin).host;
+
+      // Non-POST (GET for SSE notifications, DELETE for session close): pipe directly
+      if (method !== 'POST') {
+        const targetUrl = `${nativecoreOrigin}${reqPath}`;
+        const upReq = http.request(
+          targetUrl,
+          { method, headers: fwdHeaders, agent: upstreamAgent },
+          (res) => {
+            const outHeaders: http.OutgoingHttpHeaders = {};
+            for (const [k, v] of Object.entries(res.headers)) {
+              if (k !== 'transfer-encoding' && v !== undefined) outHeaders[k] = v;
+            }
+            clientRes.writeHead(res.statusCode ?? 200, outHeaders);
+            res.pipe(clientRes);
+            res.on('error', () => { if (!clientRes.writableEnded) clientRes.end(); });
+          },
+        );
+        upReq.on('error', () => {
+          if (!clientRes.headersSent) clientRes.writeHead(502);
+          if (!clientRes.writableEnded) clientRes.end();
+        });
+        upReq.end();
+        return;
+      }
+
+      // POST: detect initialize / notifications/initialized, maintain session ID, handle 422 + 401
+      let isInit = false;
+      let isInitializedNotification = false;
+      if (rawBody.length > 0) {
+        try {
+          const parsed = JSON.parse(rawBody.toString('utf8')) as Record<string, unknown>;
+          if (parsed?.method === 'initialize') {
+            isInit = true;
+            cachedInitBody = rawBody;
+            // initialize must NOT carry a stale session ID
+            delete fwdHeaders['mcp-session-id'];
+          } else if (parsed?.method === 'notifications/initialized') {
+            // Cache the initialized notification so we can replay it after re-init.
+            isInitializedNotification = true;
+            cachedInitializedBody = rawBody;
+          }
+        } catch { /* non-JSON body — forward as-is */ }
+      }
+
+      // Inject stored session ID into non-initialize requests that lack it
+      if (!isInit && sessionId !== null && !fwdHeaders['mcp-session-id']) {
+        fwdHeaders['mcp-session-id'] = sessionId;
+      }
+
+      /**
+       * Perform a full re-initialization cycle:
+       *   1. Send initialize (no session ID)
+       *   2. Capture new session ID
+       *   3. Send notifications/initialized with new session ID (required by MCP spec)
+       * Returns true if re-init succeeded and fwdHeaders['mcp-session-id'] is updated.
+       */
+      const reInitSession = async (): Promise<boolean> => {
+        if (cachedInitBody === null) return false;
+        const initHeaders = { ...fwdHeaders };
+        delete initHeaders['mcp-session-id'];
+        const initUp = await forwardBuffered('POST', reqPath, initHeaders, cachedInitBody);
+        const newSid = initUp.resHeaders['mcp-session-id'];
+        if (typeof newSid !== 'string') return false;
+        sessionId = newSid;
+        fwdHeaders['mcp-session-id'] = newSid;
+        console.log('[tday-mcp-proxy] re-initialized, new session:', newSid);
+        // Send notifications/initialized to complete the MCP handshake
+        if (cachedInitializedBody !== null) {
+          const notifHeaders = { ...fwdHeaders };
+          await forwardBuffered('POST', reqPath, notifHeaders, cachedInitializedBody)
+            .catch((e: unknown) => console.warn('[tday-mcp-proxy] initialized notification error:', e));
+        }
+        return true;
+      };
+
+      try {
+        let upstream = await forwardBuffered(method, reqPath, fwdHeaders, rawBody);
+
+        // 422 = server rejects the message because no session context (session ID missing).
+        // 401 = server rejects because the session ID is present but no longer exists
+        //       (nativecore restarted and the old session was lost).
+        // In both cases: re-initialize transparently and replay the original request.
+        const needsReInit =
+          !isInit &&
+          (upstream.status === 422 || upstream.status === 401) &&
+          cachedInitBody !== null;
+
+        if (needsReInit) {
+          console.log(`[tday-mcp-proxy] session error (${upstream.status}), re-initializing…`);
+          const ok = await reInitSession();
+          if (ok) {
+            // Replay original request with refreshed session ID
+            upstream = await forwardBuffered(method, reqPath, fwdHeaders, rawBody);
+          }
+        }
+
+        // Capture / update session ID from any successful response
+        const sid = upstream.resHeaders['mcp-session-id'];
+        if (typeof sid === 'string') sessionId = sid;
+
+        // Forward response to codex; add content-length so HTTP keep-alive works correctly
+        const outHeaders: http.OutgoingHttpHeaders = {};
+        for (const [k, v] of Object.entries(upstream.resHeaders)) {
+          if (k !== 'transfer-encoding' && k !== 'content-length' && v !== undefined) outHeaders[k] = v;
+        }
+        outHeaders['content-length'] = String(upstream.body.length);
+        clientRes.writeHead(upstream.status, outHeaders);
+        clientRes.end(upstream.body);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn('[tday-mcp-proxy] upstream error:', msg);
+        if (!clientRes.headersSent) {
+          clientRes.writeHead(502, { 'content-type': 'application/json' });
+        }
+        if (!clientRes.writableEnded) {
+          clientRes.end(JSON.stringify({ error: 'mcp-proxy-error', message: msg }));
+        }
+      }
+    });
+  });
+
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address() as { port: number } | null;
+      const port = addr?.port ?? 0;
+      const proxyBaseUrl = `http://127.0.0.1:${port}`;
+      console.log(`[tday-mcp-proxy] started on ${proxyBaseUrl} → ${nativecoreOrigin}/mcp`);
+      resolve({
+        proxyBaseUrl,
+        stop: () => {
+          server.close();
+          upstreamAgent.destroy();
+        },
+      });
+    });
+  });
+}
+
+// ── Codex namespace-tool proxy ────────────────────────────────────────────────
 
 /**
  * Start a local HTTP proxy that transforms codex namespace tools ↔ flat function
@@ -793,6 +1267,8 @@ export function startCodexApiProxy(realBaseUrl: string): Promise<{ proxyBaseUrl:
     realBasePath = '';
   }
 
+  const upstreamAgent = acquireProxyAgent(realOrigin);
+
   const server = http.createServer((clientReq, clientRes) => {
     let bodyChunks: Buffer[] = [];
     clientReq.on('data', (chunk: Buffer) => bodyChunks.push(chunk));
@@ -825,10 +1301,16 @@ export function startCodexApiProxy(realBaseUrl: string): Promise<{ proxyBaseUrl:
       delete forwardHeaders['transfer-encoding'];
       delete forwardHeaders['connection'];
 
+      let upstreamEnded = false;
+      let headersReceived = false;
+
       const proxyReq = transport.request(targetUrl, {
         method: clientReq.method,
         headers: forwardHeaders,
+        agent: upstreamAgent,
       }, (proxyRes) => {
+        headersReceived = true;
+        clearTimeout(headersTimer);
         const responseHeaders = { ...proxyRes.headers };
         delete responseHeaders['content-length']; // length may change after transform
         delete responseHeaders['transfer-encoding'];
@@ -836,10 +1318,26 @@ export function startCodexApiProxy(realBaseUrl: string): Promise<{ proxyBaseUrl:
 
         const contentType = (proxyRes.headers['content-type'] ?? '').toString();
 
+        let idleTimer: ReturnType<typeof setTimeout> | null = null;
+        const clearIdleTimer = () => {
+          if (idleTimer) {
+            clearTimeout(idleTimer);
+            idleTimer = null;
+          }
+        };
+        const refreshIdleTimer = (timeoutMs: number, phase: string) => {
+          clearIdleTimer();
+          idleTimer = setTimeout(() => {
+            proxyReq.destroy(new Error(`Upstream ${phase} idle timeout after ${timeoutMs}ms`));
+          }, timeoutMs);
+        };
+
         if (contentType.includes('text/event-stream')) {
           // Stream SSE line-by-line and patch function_call events
           let sseBuffer = '';
+          refreshIdleTimer(CODEX_PROXY_SSE_IDLE_TIMEOUT_MS, 'sse');
           proxyRes.on('data', (chunk: Buffer) => {
+            refreshIdleTimer(CODEX_PROXY_SSE_IDLE_TIMEOUT_MS, 'sse');
             sseBuffer += chunk.toString('utf8');
             const lines = sseBuffer.split('\n');
             sseBuffer = lines.pop() ?? '';
@@ -858,14 +1356,24 @@ export function startCodexApiProxy(realBaseUrl: string): Promise<{ proxyBaseUrl:
             }
           });
           proxyRes.on('end', () => {
-            if (sseBuffer) clientRes.write(sseBuffer);
+            upstreamEnded = true;
+            clearIdleTimer();
+            // Flush any partial line left in the buffer (should be empty for
+            // well-formed SSE but guard against truncated upstream responses).
+            if (sseBuffer.trim()) clientRes.write(sseBuffer + '\n');
             clientRes.end();
           });
         } else {
           // Buffer full response, patch JSON, forward
           const respChunks: Buffer[] = [];
-          proxyRes.on('data', (chunk: Buffer) => respChunks.push(chunk));
+          refreshIdleTimer(CODEX_PROXY_JSON_TIMEOUT_MS, 'json');
+          proxyRes.on('data', (chunk: Buffer) => {
+            refreshIdleTimer(CODEX_PROXY_JSON_TIMEOUT_MS, 'json');
+            respChunks.push(chunk);
+          });
           proxyRes.on('end', () => {
+            upstreamEnded = true;
+            clearIdleTimer();
             const raw = Buffer.concat(respChunks);
             let out = raw;
             if (contentType.includes('application/json') && raw.length > 0) {
@@ -881,16 +1389,37 @@ export function startCodexApiProxy(realBaseUrl: string): Promise<{ proxyBaseUrl:
         }
 
         proxyRes.on('error', (err) => {
+          upstreamEnded = true;
+          clearIdleTimer();
           console.warn('[tday-codex-proxy] upstream error:', err.message);
-          if (!clientRes.writableEnded) clientRes.end();
+          writeProxyError(clientRes, 502, 'upstream-response', `Proxy upstream response error: ${err.message}`);
         });
       });
 
+      const abortUpstream = () => {
+        if (!upstreamEnded && !proxyReq.destroyed) {
+          proxyReq.destroy(new Error('Client disconnected before upstream completed'));
+        }
+      };
+      clientReq.once('aborted', abortUpstream);
+      clientRes.once('close', abortUpstream);
+
+      const headersTimer = setTimeout(() => {
+        if (!headersReceived && !proxyReq.destroyed) {
+          proxyReq.destroy(new Error(`Upstream headers timeout after ${CODEX_PROXY_HEADERS_TIMEOUT_MS}ms`));
+        }
+      }, CODEX_PROXY_HEADERS_TIMEOUT_MS);
+
       proxyReq.on('error', (err) => {
+        clearTimeout(headersTimer);
+        upstreamEnded = true;
+        // Ignore destroy-triggered errors when the client already disconnected.
+        if (clientRes.destroyed || clientRes.writableEnded) return;
         console.warn('[tday-codex-proxy] request error:', err.message);
-        if (!clientRes.headersSent) clientRes.writeHead(502);
-        if (!clientRes.writableEnded) clientRes.end('Proxy error: ' + err.message);
+        writeProxyError(clientRes, 502, headersReceived ? 'upstream-stream' : 'upstream-connect', `Proxy upstream error: ${err.message}`);
       });
+
+      proxyReq.on('close', () => clearTimeout(headersTimer));
 
       proxyReq.write(forwardBody);
       proxyReq.end();
@@ -904,7 +1433,10 @@ export function startCodexApiProxy(realBaseUrl: string): Promise<{ proxyBaseUrl:
   // Bind to a random available port on localhost; read back the actual port
   // only after the 'listening' event fires (server.address() returns null before then).
   return new Promise<{ proxyBaseUrl: string; stop: () => void }>((resolve, reject) => {
-    server.once('error', reject);
+    server.once('error', (err) => {
+      releaseProxyAgent(realOrigin);
+      reject(err);
+    });
     server.listen(0, '127.0.0.1', () => {
       const address = server.address() as { port: number } | null;
       const port = address?.port ?? 0;
@@ -912,7 +1444,7 @@ export function startCodexApiProxy(realBaseUrl: string): Promise<{ proxyBaseUrl:
       // the identical request path (e.g. /v1/responses or /responses).
       const proxyBaseUrl = `http://127.0.0.1:${port}${realBasePath}`;
       console.log(`[tday-codex-proxy] started on ${proxyBaseUrl}, forwarding to ${realBaseUrl}`);
-      codexProxyCache.set(realBaseUrl, { proxyBaseUrl, refCount: 1, server });
+      codexProxyCache.set(realBaseUrl, { proxyBaseUrl, refCount: 1, server, upstreamOrigin: realOrigin });
       resolve({ proxyBaseUrl, stop: makeProxyStop(realBaseUrl) });
     });
   });
@@ -929,6 +1461,7 @@ function makeProxyStop(realBaseUrl: string): () => void {
     }
     codexProxyCache.delete(realBaseUrl);
     entry.server.close();
+    releaseProxyAgent(entry.upstreamOrigin);
     console.log(`[tday-codex-proxy] stopped proxy for ${realBaseUrl}`);
   };
 }

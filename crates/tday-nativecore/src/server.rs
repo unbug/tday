@@ -40,6 +40,16 @@ pub struct DevToolsServer {
     screen_rec:    SharedScreenRecorder,
     #[cfg(feature = "cdp")]
     cdp_client:    Arc<RwLock<Option<CdpClient>>>,
+    /// Read/write concurrency guard for platform API calls.
+    ///
+    /// - Read lock  (`tool_lock.read()`)  — multiple "query" tools can run in
+    ///   parallel: screenshots, AX snapshots, list_windows, etc.
+    /// - Write lock (`tool_lock.write()`) — exclusive for every tool that mutates
+    ///   system state (mouse/keyboard input, AX actions, window management, …).
+    ///
+    /// Tokio's RwLock is *write-preferring*: once a write is queued, new reads
+    /// also wait behind it, preventing write starvation.
+    tool_lock: Arc<RwLock<()>>,
 }
 
 impl DevToolsServer {
@@ -54,6 +64,7 @@ impl DevToolsServer {
             screen_rec:    Arc::new(RwLock::new(None)),
             #[cfg(feature = "cdp")]
             cdp_client:    Arc::new(RwLock::new(None)),
+            tool_lock: Arc::new(RwLock::new(())),
         }
     }
 }
@@ -106,20 +117,62 @@ impl ServerHandler for DevToolsServer {
             .map(Value::Object)
             .unwrap_or(Value::Object(Default::default()));
 
-        let result = dispatch(
-            &request.name,
-            params,
-            self.ss_cache.clone(),
-            self.img_cache.clone(),
-            self.ax.clone(),
-            self.android.clone(),
-            self.app_client.clone(),
-            self.hover_tracker.clone(),
-            self.screen_rec.clone(),
-            #[cfg(feature = "cdp")]
-            self.cdp_client.clone(),
-            ctx.peer.clone(),
-        ).await;
+        // Acquire the appropriate concurrency guard before touching any platform API:
+        //   - None-classified tools: no lock (independent of AX/CG; run freely)
+        //   - read-classified tools: shared read lock → concurrent execution
+        //   - write-classified tools: exclusive write lock → serialised
+        //
+        // A 45-second timeout on lock acquisition prevents a single stuck or
+        // long-running Write tool from cascading into MCP -32001 timeouts for
+        // all waiting tool calls from all other agents.
+        let result = match tool_kind(&request.name) {
+            ToolKind::None => {
+                dispatch(
+                    &request.name, params,
+                    self.ss_cache.clone(), self.img_cache.clone(), self.ax.clone(),
+                    self.android.clone(), self.app_client.clone(),
+                    self.hover_tracker.clone(), self.screen_rec.clone(),
+                    #[cfg(feature = "cdp")] self.cdp_client.clone(),
+                    ctx.peer.clone(),
+                ).await
+            }
+            ToolKind::Read => {
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(45),
+                    self.tool_lock.read(),
+                ).await {
+                    Err(_) => Err(crate::error::DevToolsError::Input(
+                        "timed out waiting for tool lock (a write tool is taking too long)".into()
+                    )),
+                    Ok(_guard) => dispatch(
+                        &request.name, params,
+                        self.ss_cache.clone(), self.img_cache.clone(), self.ax.clone(),
+                        self.android.clone(), self.app_client.clone(),
+                        self.hover_tracker.clone(), self.screen_rec.clone(),
+                        #[cfg(feature = "cdp")] self.cdp_client.clone(),
+                        ctx.peer.clone(),
+                    ).await,
+                }
+            }
+            ToolKind::Write => {
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(45),
+                    self.tool_lock.write(),
+                ).await {
+                    Err(_) => Err(crate::error::DevToolsError::Input(
+                        "timed out waiting for tool lock (a write tool is taking too long)".into()
+                    )),
+                    Ok(_guard) => dispatch(
+                        &request.name, params,
+                        self.ss_cache.clone(), self.img_cache.clone(), self.ax.clone(),
+                        self.android.clone(), self.app_client.clone(),
+                        self.hover_tracker.clone(), self.screen_rec.clone(),
+                        #[cfg(feature = "cdp")] self.cdp_client.clone(),
+                        ctx.peer.clone(),
+                    ).await,
+                }
+            }
+        };
 
         Ok(match result {
             Ok(v)  => ok_result(v),
@@ -128,6 +181,68 @@ impl ServerHandler for DevToolsServer {
                 is_error: Some(true),
             },
         })
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Tool concurrency classification
+// ──────────────────────────────────────────────────────────────────────────────
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ToolKind { None, Read, Write }
+
+/// Classify each tool into one of three concurrency tiers:
+///
+/// - `None`  — fully independent of AX/CoreGraphics; run without any lock.
+///             Shell commands, file I/O, process management, Android/ADB.
+///             A slow `execute_command` or `filesystem` search must NOT block
+///             screenshots or clicks from other agents.
+/// - `Read`  — reads AX tree / CoreGraphics state; shared read lock allows
+///             multiple concurrent queries (screenshots, AX snapshots, etc.).
+/// - `Write` — mutates system state (mouse/keyboard, AX actions, window ops,
+///             clipboard); exclusive write lock, serialises globally.
+///
+/// When in doubt classify as Write — conservative is always safe.
+fn tool_kind(name: &str) -> ToolKind {
+    // All Android tools go through ADB (USB/TCP), never touch the host AX/CG stack.
+    if name.starts_with("android_") {
+        return ToolKind::None;
+    }
+    match name {
+        // ── Fully independent: no AX/CoreGraphics interaction ──────────────
+        // A slow shell command or recursive filesystem search must never block
+        // UI automation tools from other agent sessions.
+        "execute_command"
+        | "filesystem"
+        | "sys_process"
+        | "sys_wait"
+        | "scrape" => ToolKind::None,
+
+        // ── Pure AX/CG queries: safe to run concurrently ───────────────────
+        "take_screenshot"
+        | "load_image"
+        | "find_image"
+        | "list_windows"
+        | "list_apps"
+        | "get_displays"
+        | "take_ax_snapshot"
+        | "ax_find"
+        | "ax_focused"
+        | "find_text"
+        | "element_at_point"
+        | "get_cursor_position"
+        | "get_hover_events"
+        | "probe_app"
+        // app-protocol read operations
+        | "app_get_info"
+        | "app_get_tree"
+        | "app_query"
+        | "app_get_element"
+        | "app_list_windows"
+        | "app_screenshot" => ToolKind::Read,
+
+        // Everything else mutates system state → exclusive write lock
+        _ => ToolKind::Write,
     }
 }
 
@@ -722,12 +837,19 @@ fn tool_list() -> Vec<Tool> {
             })),
 
         // ── Accessibility
-        t("take_ax_snapshot", "Take a snapshot of the AX tree for an application",
+        t("take_ax_snapshot", "Take a snapshot of the AX tree for an application. \
+             Returns the full tree (up to 10,000 nodes). Use max_depth (e.g. 3) for \
+             a shallow first look — much faster. Prefer ax_find when you know what you are \
+             looking for. Last resort: use only when ax_find cannot find the element.",
             json!({
                 "type": "object",
                 "properties": {
-                    "app_name": { "type": "string" },
-                    "pid":      { "type": "integer" }
+                    "app_name":  { "type": "string" },
+                    "pid":       { "type": "integer" },
+                    "max_depth": {
+                        "type": "integer",
+                        "description": "Limit tree depth (e.g. 3 for quick exploration). Default: unlimited."
+                    }
                 }
             })),
         t("ax_click", "Click an element from a previous AX snapshot",

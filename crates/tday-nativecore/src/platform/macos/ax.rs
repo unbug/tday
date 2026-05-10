@@ -146,6 +146,7 @@ pub fn find_text(search: &str, window_id: Option<u32>) -> Result<Vec<TextMatch>,
                     }
                 }
             }
+            true // always continue — find_text collects all matches
         });
         core_foundation::base::CFRelease(app as _);
     }
@@ -208,9 +209,11 @@ pub fn element_at_point(x: f64, y: f64, _app_name: Option<&str>) -> Result<Eleme
 
 /// Take a snapshot of the AX tree for the given pid.
 /// Returns (root_node, uid→AXRef map, generation).
+/// `max_depth` limits how deep the tree traversal goes (u32::MAX = unlimited).
 pub fn take_snapshot(
     pid: i32,
     generation: u64,
+    max_depth: u32,
 ) -> Result<(AXNode, HashMap<u32, AXRef>), String> {
     let app = unsafe { AXUIElementCreateApplication(pid) };
     if app.is_null() {
@@ -220,7 +223,7 @@ pub fn take_snapshot(
     let mut refs: HashMap<u32, AXRef> = HashMap::new();
     let mut uid_counter: u32 = 0;
 
-    let node = unsafe { snapshot_element(app, &mut refs, &mut uid_counter, generation, 0) };
+    let node = unsafe { snapshot_element(app, &mut refs, &mut uid_counter, generation, 0, max_depth) };
     unsafe { core_foundation::base::CFRelease(app as _); }
     Ok((node, refs))
 }
@@ -231,6 +234,7 @@ unsafe fn snapshot_element(
     counter: &mut u32,
     generation: u64,
     depth: u32,
+    max_depth: u32,
 ) -> AXNode {
     let uid_n = *counter;
     *counter += 1;
@@ -248,13 +252,13 @@ unsafe fn snapshot_element(
     let focused = get_bool(el, "AXFocused");
 
     let mut children = Vec::new();
-    if depth < MAX_DEPTH && (*counter as usize) < MAX_ELEMENTS {
+    if depth < MAX_DEPTH && depth < max_depth && (*counter as usize) < MAX_ELEMENTS {
         if let Some(kids) = ax_children(el) {
             for i in 0..kids.len() {
                 let child = *kids.get_unchecked(i) as AXUIElementRef;
                 if !child.is_null() {
                     core_foundation::base::CFRetain(child as _);
-                    let node = snapshot_element(child, refs, counter, generation, depth + 1);
+                    let node = snapshot_element(child, refs, counter, generation, depth + 1, max_depth);
                     core_foundation::base::CFRelease(child as _);
                     children.push(node);
                 }
@@ -295,13 +299,14 @@ pub fn ax_find_elements(
 
     unsafe {
         walk_tree(app, &mut walk_count, 0, &mut |el| {
-            if nodes.len() >= max_results { return; }
+            // Early exit: stop the entire traversal once we have enough results.
+            if nodes.len() >= max_results { return false; }
 
             let role = get_string(el, "AXRole").unwrap_or_else(|| "unknown".into());
 
             // Role filter
             if let Some(rf) = &role_lower {
-                if !role.to_lowercase().contains(rf.as_str()) { return; }
+                if !role.to_lowercase().contains(rf.as_str()) { return true; }
             }
 
             // Text filter
@@ -309,7 +314,7 @@ pub fn ax_find_elements(
                 let hit = ["AXTitle", "AXValue", "AXDescription"]
                     .iter()
                     .any(|a| get_string(el, a).map_or(false, |s| s.to_lowercase().contains(tq.as_str())));
-                if !hit { return; }
+                if !hit { return true; }
             } else if role_lower.is_none() {
                 // Neither filter set — match everything (dangerous for large apps)
                 // Limit to interactive roles only
@@ -319,7 +324,7 @@ pub fn ax_find_elements(
                     | "AXRadioButton" | "AXComboBox" | "AXPopUpButton" | "AXSlider"
                     | "AXLink" | "AXMenuItem" | "AXTab" | "AXStaticText"
                 );
-                if !interactive { return; }
+                if !interactive { return true; }
             }
 
             let uid_n = uid_counter;
@@ -346,6 +351,7 @@ pub fn ax_find_elements(
                 focused,
                 children: vec![], // no children — keeps response slim
             });
+            true // continue walking
         });
         core_foundation::base::CFRelease(app as _);
     }
@@ -551,23 +557,27 @@ pub(crate) unsafe fn element_bbox(el: AXUIElementRef) -> Option<Rect> {
 // Tree walk
 // ──────────────────────────────────────────────────────────────────────────────
 
+/// Walk the AX tree depth-first.  `visitor` returns `true` to continue or
+/// `false` to abort the entire traversal (used for early-exit in `ax_find`).
 unsafe fn walk_tree(
     el: AXUIElementRef,
     count: &mut usize,
     depth: u32,
-    visitor: &mut dyn FnMut(AXUIElementRef),
-) {
-    if depth > MAX_DEPTH || *count >= MAX_ELEMENTS { return; }
+    visitor: &mut dyn FnMut(AXUIElementRef) -> bool,
+) -> bool {
+    if depth > MAX_DEPTH || *count >= MAX_ELEMENTS { return true; }
     *count += 1;
-    visitor(el);
+    if !visitor(el) { return false; }
     if let Some(kids) = ax_children(el) {
         for i in 0..kids.len() {
             let child = *kids.get_unchecked(i) as AXUIElementRef;
             core_foundation::base::CFRetain(child as _);
-            walk_tree(child, count, depth + 1, visitor);
+            let cont = walk_tree(child, count, depth + 1, visitor);
             core_foundation::base::CFRelease(child as _);
+            if !cont { return false; }
         }
     }
+    true
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

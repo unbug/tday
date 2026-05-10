@@ -38,6 +38,7 @@ impl AXRef {
 pub fn take_snapshot(
     pid: i32,
     generation: u64,
+    _max_depth: u32,
 ) -> Result<(AXNode, HashMap<u32, AXRef>), String> {
     // AT-SPI2 full traversal would require atspi crate or dbus calls.
     // Return a minimal root node so callers don't break.
@@ -319,5 +320,80 @@ pub fn resize_window_by_pid(
         super::app::resize_window(&name, x, y, width, height)
     } else {
         Err(format!("No process for PID {pid}"))
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Tests
+// ──────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── take_snapshot stub ────────────────────────────────────────────────────
+
+    #[test]
+    fn take_snapshot_returns_application_root() {
+        // The stub creates a minimal root regardless of PID or max_depth.
+        let (root, refs) = take_snapshot(99999, 42, u32::MAX).unwrap();
+        assert_eq!(root.uid,  "a0g42");
+        assert_eq!(root.role, "application");
+        assert!(root.enabled == Some(true));
+        assert!(root.children.is_empty());
+        // Stub returns no refs (no live elements to register)
+        assert!(refs.is_empty());
+    }
+
+    #[test]
+    fn take_snapshot_honours_generation_in_uid() {
+        let (root, _) = take_snapshot(1, 7, 3).unwrap();
+        assert_eq!(root.uid, "a0g7");
+    }
+
+    #[test]
+    fn take_snapshot_max_depth_ignored_by_stub() {
+        // max_depth is accepted but the stub always returns the same structure
+        let (root_full,  _) = take_snapshot(1, 1, u32::MAX).unwrap();
+        let (root_zero,  _) = take_snapshot(1, 1, 0).unwrap();
+        assert_eq!(root_full.uid,  root_zero.uid);
+        assert_eq!(root_full.role, root_zero.role);
+    }
+
+    // ── ax_find_elements ──────────────────────────────────────────────────────
+
+    #[test]
+    fn ax_find_elements_returns_empty_when_no_text_query() {
+        // None text_query → empty result (no OCR call needed)
+        let (nodes, refs) = ax_find_elements(0, None, None, 20, 1).unwrap();
+        assert!(nodes.is_empty());
+        assert!(refs.is_empty());
+    }
+
+    #[test]
+    fn ax_find_elements_returns_empty_for_empty_string_query() {
+        let (nodes, refs) = ax_find_elements(0, Some(""), None, 20, 1).unwrap();
+        assert!(nodes.is_empty());
+        assert!(refs.is_empty());
+    }
+
+    // ── AXRef helpers ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn axref_center_with_bounds() {
+        let ax = AXRef {
+            bounds: Some(Rect { x: 10.0, y: 20.0, width: 100.0, height: 40.0 }),
+            role: "Button".into(),
+            name: None,
+        };
+        let (cx, cy) = ax.center().unwrap();
+        assert!((cx - 60.0).abs() < 1e-9);
+        assert!((cy - 40.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn axref_center_without_bounds_returns_none() {
+        let ax = AXRef { bounds: None, role: "Text".into(), name: None };
+        assert!(ax.center().is_none());
     }
 }

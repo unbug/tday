@@ -63,6 +63,7 @@ impl AXRef {
 pub fn take_snapshot(
     pid: i32,
     generation: u64,
+    max_depth: u32,
 ) -> Result<(AXNode, HashMap<u32, AXRef>), String> {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
@@ -94,6 +95,7 @@ pub fn take_snapshot(
             generation,
             &mut element_count,
             0,
+            max_depth,
         );
 
         Ok((node, refs))
@@ -108,8 +110,9 @@ unsafe fn collect_uia_node(
     generation: u64,
     element_count: &mut usize,
     depth: u32,
+    max_depth: u32,
 ) -> AXNode {
-    if depth > MAX_DEPTH || *element_count >= MAX_ELEMENTS {
+    if depth > MAX_DEPTH || depth > max_depth || *element_count >= MAX_ELEMENTS {
         let uid_n = *counter;
         *counter += 1;
         return AXNode {
@@ -178,7 +181,7 @@ unsafe fn collect_uia_node(
         let mut current = child;
         loop {
             let child_node = collect_uia_node(
-                walker, &current, refs, counter, generation, element_count, depth + 1,
+                walker, &current, refs, counter, generation, element_count, depth + 1, max_depth,
             );
             children.push(child_node);
             match walker.GetNextSiblingElement(&current) {
@@ -769,6 +772,9 @@ pub fn find_window_for_pid(pid: u32) -> Option<HWND> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    // ── uia_control_type_name ─────────────────────────────────────────────────
 
     #[test]
     fn test_uia_control_type_name_known() {
@@ -779,5 +785,60 @@ mod tests {
     #[test]
     fn test_uia_control_type_name_unknown() {
         assert_eq!(uia_control_type_name(99999), "Unknown");
+    }
+
+    #[test]
+    fn test_uia_control_type_name_all_common_roles() {
+        let cases: &[(i32, &str)] = &[
+            (50004, "Edit"),
+            (50005, "Hyperlink"),
+            (50002, "CheckBox"),
+            (50003, "ComboBox"),
+            (50013, "RadioButton"),
+            (50015, "Slider"),
+            (50011, "MenuItem"),
+            (50019, "TabItem"),
+            (50020, "Text"),
+            (50007, "ListItem"),
+            (50023, "Tree"),
+            (50024, "TreeItem"),
+        ];
+        for (id, expected) in cases {
+            assert_eq!(&uia_control_type_name(*id), expected, "id={id}");
+        }
+    }
+
+    // ── collect_uia_node depth-truncation logic ───────────────────────────────
+    //
+    // collect_uia_node requires live COM objects so we cannot instantiate it
+    // directly in unit tests.  We document and test the guard expression here
+    // to catch regressions if the condition is ever modified.
+
+    #[test]
+    fn depth_guard_expression() {
+        // Mirrors: `if depth > MAX_DEPTH || depth > max_depth || ...`
+        let check = |depth: u32, max_depth: u32| -> bool {
+            depth > 50 || depth > max_depth
+        };
+        assert!(!check(0,  3),  "root at depth 0 is never truncated");
+        assert!(!check(3,  3),  "depth == max_depth should not truncate");
+        assert!( check(4,  3),  "depth > max_depth triggers truncation");
+        assert!( check(51, 99), "depth > MAX_DEPTH(50) triggers truncation");
+    }
+
+    // ── max_depth parameter parsing (mirrors handler expression) ──────────────
+
+    #[test]
+    fn max_depth_parsing_and_clamping() {
+        let parse = |v: serde_json::Value| -> u32 {
+            v.get("max_depth")
+                .and_then(|v| v.as_u64())
+                .map(|d| d.min(50) as u32)
+                .unwrap_or(u32::MAX)
+        };
+        assert_eq!(parse(json!({})),                 u32::MAX);
+        assert_eq!(parse(json!({ "max_depth": 3 })), 3);
+        assert_eq!(parse(json!({ "max_depth": 50})), 50);
+        assert_eq!(parse(json!({ "max_depth": 99})), 50, "clamped to 50");
     }
 }

@@ -384,8 +384,12 @@ export function modelFlagsFor(
       args.push('-c', `model_metadata.${metaKey}.context_window=128000`);
       args.push('-c', `model_metadata.${metaKey}.max_output_tokens=8192`);
       // Always open with full access — skip sandbox restrictions and approval prompts.
+      // Use the dedicated CLI flag (--sandbox / -s) rather than the -c TOML override
+      // because the TOML key is `sandbox_mode` but -c only accepts `sandbox`, which is
+      // not always recognised, causing workspace-write mode to be used from config.toml
+      // and triggering MCP elicitation dialogs that tday's PTY cannot handle.
       args.push('-c', 'approval_policy="never"');
-      args.push('-c', 'sandbox="danger-full-access"');
+      args.push('--sandbox', 'danger-full-access');
       return args;
     }
     case 'copilot':
