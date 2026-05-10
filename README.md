@@ -151,63 +151,56 @@ Today, every coding-agent harness ships with its own CLI, its own provider confi
 ## 3. Architecture
 
 ```mermaid
-graph TB
+flowchart TD
     subgraph App["Tday Desktop App"]
         subgraph Renderer["🖥 Renderer · React + Vite + TypeScript"]
-            R1["Tab Manager (browser-style tabs)"]
-            R2["Terminal View (xterm.js + WebGL)"]
+            direction TB
+            R1["Tab Manager — browser-style tabs"]
+            R2["Terminal — xterm.js + WebGL renderer"]
             R3["Agent Picker · Settings · Usage Dashboard"]
-            R4["UI: Tailwind + shadcn/ui + border-beam"]
+            R4["Tailwind · shadcn/ui · border-beam"]
+            R1 ~~~ R2 ~~~ R3 ~~~ R4
         end
 
-        IPC(["⇅ IPC · typed contextBridge"])
+        IPC(["⇅ IPC — typed contextBridge"])
 
         subgraph Main["⚡ Main Process · Electron + Node"]
-            M1["Session Service — node-pty, one PTY per tab"]
-            M2["Agent Adapter Registry\npi · claude-code · codex · copilot · opencode · gemini · …"]
-            M3["Provider Service — env-var injection + secret store"]
-            M4["IPC Bridge — typed channels"]
-            subgraph GW["Gateway · OpenAI Responses API → Anthropic"]
+            direction TB
+            M1["Session Service — node-pty · one PTY/tab"]
+            M2["Agent Adapter Registry — 10 adapters"]
+            M3["Provider Service · IPC Bridge"]
+            subgraph GW["Gateway — OpenAI Responses → Anthropic"]
+                direction TB
                 G1["bridge/ — input · tools · response · stream"]
-                G2["anthropic/ — HTTP client + SSE parser"]
-                G3["deepseek/ — thinking encoder + session state cache"]
+                G2["anthropic/ · deepseek/ — HTTP + SSE + thinking"]
+                G1 ~~~ G2
             end
+            M1 ~~~ M2 ~~~ M3 ~~~ GW
         end
 
-        STDIO1(["⇅ JSON-RPC / stdio"])
-        STDIO2(["⇅ Streamable HTTP / MCP"])
-
-        subgraph Core["🦀 tday-core · Rust binary"]
-            C1["Local-inference scanner\nOllama · LM Studio · vLLM · llama.cpp · SGLang"]
-            C2["Token counter — tiktoken-rs / tokenizers"]
-            C3["Memory store — SQLite + sqlite-vec"]
-            C4["Usage logger — per-agent / per-provider / per-tab"]
-            C5["Config & secrets — keyring, OS keychain"]
-        end
-
-        subgraph Native["🦀 tday-nativecore · Rust MCP server · Computer Use"]
-            N1["AX tree — take_ax_snapshot · ax_click · ax_set_value · ax_find"]
-            N2["OCR — find_text (Vision / WinRT OCR / Tesseract, multi-display)"]
-            N3["Mouse / Keyboard — click · type_text · shortcut · scroll · drag"]
-            N4["Screenshot — take_screenshot (all platforms, all displays)"]
-            N5["CDP — probe_app · cdp_connect · cdp_find_elements · cdp_click"]
-            N6["Android ADB — adb_tap · adb_key · adb_screenshot"]
-            N7["Launcher — open_app · sys_process · execute_command · clipboard"]
+        subgraph Rust["🦀 Rust Layer"]
+            direction TB
+            subgraph Core["tday-core — Rust static binary"]
+                direction TB
+                C1["Local-inference scanner — Ollama · LM Studio · vLLM · llama.cpp"]
+                C2["Token counter · Memory store (SQLite + sqlite-vec)"]
+                C3["Usage logger · Config & secrets (OS keychain)"]
+                C1 ~~~ C2 ~~~ C3
+            end
+            subgraph Native["tday-nativecore — Rust MCP · Computer Use"]
+                direction TB
+                N1["AX tree · OCR · Mouse / Keyboard · Screenshot"]
+                N2["CDP · Android ADB · Launcher · Clipboard · System"]
+                N1 ~~~ N2
+            end
+            Core ~~~ Native
         end
     end
 
-    Renderer <-->|IPC contextBridge| Main
-    Main <-->|spawns| Core
-    Main <-->|spawns| Native
-
-    style Renderer fill:#1e1b4b,stroke:#7c3aed,color:#e2e8f0
-    style Main fill:#1a2e1a,stroke:#16a34a,color:#e2e8f0
-    style Core fill:#1c1917,stroke:#d97706,color:#e2e8f0
-    style Native fill:#1c1917,stroke:#d97706,color:#e2e8f0
-    style GW fill:#0f1629,stroke:#3b82f6,color:#e2e8f0
-    style IPC fill:#374151,stroke:#6b7280,color:#f9fafb
-    style STDIO1 fill:#374151,stroke:#6b7280,color:#f9fafb
-    style STDIO2 fill:#374151,stroke:#6b7280,color:#f9fafb
+    Renderer <-->|"IPC contextBridge"| IPC
+    IPC <-->|"typed channels"| Main
+    Main -->|"JSON-RPC / stdio"| Core
+    Main -->|"Streamable HTTP / MCP"| Native
 ```
 
 ### Why this split
