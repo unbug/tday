@@ -151,56 +151,42 @@ Today, every coding-agent harness ships with its own CLI, its own provider confi
 ## 3. Architecture
 
 ```mermaid
-flowchart TD
-    subgraph App["Tday Desktop App"]
-        subgraph Renderer["🖥 Renderer · React + Vite + TypeScript"]
+flowchart TB
+    subgraph Presentation["🖥  Presentation Layer · React · Vite · TypeScript"]
+        direction LR
+        TM["Tab Manager\nbrowser-style tabs"]
+        TV["Terminal View\nxterm.js + WebGL"]
+        UI["Agent Picker · Settings\nUsage Dashboard · Cron"]
+        KIT["Tailwind · shadcn/ui\nborder-beam"]
+    end
+
+    subgraph Application["⚡  Application Layer · Electron Main · Node.js"]
+        direction LR
+        SS["Session Service\nnode-pty · one PTY / tab"]
+        AA["Agent Adapters\n10 harnesses"]
+        PS["Provider Service\nenv-var injection · 28 providers"]
+        IB["IPC Bridge\ntyped contextBridge channels"]
+        GW["Gateway\nOpenAI Responses API → Anthropic"]
+    end
+
+    subgraph Infrastructure["🦀  Infrastructure Layer · Rust"]
+        direction LR
+        subgraph CORE["tday-core · static binary · JSON-RPC / stdio"]
             direction TB
-            R1["Tab Manager — browser-style tabs"]
-            R2["Terminal — xterm.js + WebGL renderer"]
-            R3["Agent Picker · Settings · Usage Dashboard"]
-            R4["Tailwind · shadcn/ui · border-beam"]
-            R1 ~~~ R2 ~~~ R3 ~~~ R4
+            SC["Inference Scanner\nOllama · LM Studio · vLLM · llama.cpp · SGLang"]
+            TC["Token Counter · Memory Store\ntiktoken-rs · SQLite + sqlite-vec"]
+            UL["Usage Logger · Config & Secrets\nper-agent / per-provider · OS keychain"]
         end
-
-        IPC(["⇅ IPC — typed contextBridge"])
-
-        subgraph Main["⚡ Main Process · Electron + Node"]
+        subgraph NC["tday-nativecore · MCP server · Streamable HTTP"]
             direction TB
-            M1["Session Service — node-pty · one PTY/tab"]
-            M2["Agent Adapter Registry — 10 adapters"]
-            M3["Provider Service · IPC Bridge"]
-            subgraph GW["Gateway — OpenAI Responses → Anthropic"]
-                direction TB
-                G1["bridge/ — input · tools · response · stream"]
-                G2["anthropic/ · deepseek/ — HTTP + SSE + thinking"]
-                G1 ~~~ G2
-            end
-            M1 ~~~ M2 ~~~ M3 ~~~ GW
-        end
-
-        subgraph Rust["🦀 Rust Layer"]
-            direction TB
-            subgraph Core["tday-core — Rust static binary"]
-                direction TB
-                C1["Local-inference scanner — Ollama · LM Studio · vLLM · llama.cpp"]
-                C2["Token counter · Memory store (SQLite + sqlite-vec)"]
-                C3["Usage logger · Config & secrets (OS keychain)"]
-                C1 ~~~ C2 ~~~ C3
-            end
-            subgraph Native["tday-nativecore — Rust MCP · Computer Use"]
-                direction TB
-                N1["AX tree · OCR · Mouse / Keyboard · Screenshot"]
-                N2["CDP · Android ADB · Launcher · Clipboard · System"]
-                N1 ~~~ N2
-            end
-            Core ~~~ Native
+            AX["AX Tree · OCR · Mouse · Keyboard · Screenshot\nmacOS (Vision) · Windows (WinRT) · Linux (Tesseract)"]
+            CDP["CDP · Android ADB · Launcher · System\nprobe_app · cdp_click · adb_tap · execute_command · clipboard"]
         end
     end
 
-    Renderer <-->|"IPC contextBridge"| IPC
-    IPC <-->|"typed channels"| Main
-    Main -->|"JSON-RPC / stdio"| Core
-    Main -->|"Streamable HTTP / MCP"| Native
+    Presentation <-->|"IPC · contextBridge"| Application
+    Application -->|"JSON-RPC / stdio"| CORE
+    Application -->|"Streamable HTTP / MCP"| NC
 ```
 
 ### Why this split
