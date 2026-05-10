@@ -179,7 +179,6 @@ fn windows_wait(ppid: u32) {
                 OpenProcess, TerminateProcess, WaitForSingleObject,
                 PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, INFINITE,
             };
-            use windows::Win32::System::Threading::GetCurrentProcess;
 
             unsafe {
                 let Ok(h) = OpenProcess(PROCESS_SYNCHRONIZE, false, ppid) else {
@@ -205,7 +204,7 @@ fn windows_wait(ppid: u32) {
 #[cfg(target_os = "windows")]
 fn windows_parent_pid() -> Option<u32> {
     use windows::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32First, Process32Next,
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW,
         PROCESSENTRY32W, TH32CS_SNAPPROCESS,
     };
     use windows::Win32::Foundation::CloseHandle;
@@ -222,14 +221,14 @@ fn windows_parent_pid() -> Option<u32> {
             ..std::mem::zeroed()
         };
 
-        if Process32First(snap, &mut entry).is_ok() {
+        if Process32FirstW(snap, &mut entry).is_ok() {
             loop {
                 if entry.th32ProcessID == my_pid {
                     let ppid = entry.th32ParentProcessID;
                     let _ = CloseHandle(snap);
                     return Some(ppid);
                 }
-                if Process32Next(snap, &mut entry).is_err() {
+                if Process32NextW(snap, &mut entry).is_err() {
                     break;
                 }
             }
