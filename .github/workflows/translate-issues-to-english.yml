@@ -1,0 +1,36 @@
+name: Translate Chinese Issues to English
+
+on:
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  translate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Translate Chinese issues to English
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+
+          # Mapping: Chinese issue # -> English issue #
+          # Chinese issues #34-55 map to English issues #56-77 (offset +22)
+          for cn_num in $(seq 34 55); do
+            en_num=$((cn_num + 22))
+            echo "Updating #${cn_num} from #${en_num}..."
+
+            en_title=$(gh issue view "${en_num}" --repo unbug/tday --json title -q .title)
+            en_body=$(gh issue view "${en_num}" --repo unbug/tday --json body -q .body)
+
+            gh issue edit "${cn_num}" \
+              --repo unbug/tday \
+              --title "${en_title}" \
+              --body "${en_body}"
+
+            echo "  Done: #${cn_num} -> \"${en_title}\""
+          done
+
+          echo "All Chinese issues have been updated with English titles and descriptions."
