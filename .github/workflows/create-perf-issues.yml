@@ -5,6 +5,9 @@ name: Create Performance Optimization Issues
 # Each run is idempotent: it skips any issue whose title already exists.
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - copilot/analyze-project-performance-optimization
 
 permissions:
   issues: write
