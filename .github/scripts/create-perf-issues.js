@@ -43,138 +43,138 @@ module.exports = async ({ github, context }) => {
 
   const issues = [
     {
-      title: 'perf(screenshot): 全屏截图存在 JPEG→PNG 双重编解码，浪费 4 次图像操作',
-      body: `## 问题
+      title: 'perf(screenshot): Full-screen capture performs redundant JPEG→PNG round-trip, wasting 4 image operations',
+      body: `## Problem
 
 \`crates/tday-nativecore/src/handlers/screenshot.rs\` L27–59
 
-全屏截图路径做了 4 次图像操作：
+The full-screen capture path performs 4 image operations:
 
-1. \`platform::capture_screen()\` 返回 PNG
-2. 第一个 \`spawn_blocking\`：PNG 解码 → 编码 JPEG（给响应用）
-3. 第二个 \`spawn_blocking\`：JPEG 解码 → 再编码 PNG（存入 \`ScreenshotCache\`）
+1. \`platform::capture_screen()\` returns PNG
+2. First \`spawn_blocking\`: PNG decode → JPEG encode (for the HTTP response)
+3. Second \`spawn_blocking\`: JPEG decode → PNG re-encode (to store in \`ScreenshotCache\`)
 
-每次全屏截图额外触发了一次 \`spawn_blocking\` 任务调度和一次 JPEG 解码+PNG 重编码。
+Each full-screen capture triggers an extra \`spawn_blocking\` task and a redundant JPEG decode + PNG re-encode.
 
 \`\`\`rust
-// L47-59  ← 多余的 spawn_blocking
+// L47-59  ← unnecessary spawn_blocking
 let png_data = tokio::task::spawn_blocking({
     let jb = jpeg_bytes.clone();
     move || {
-        let img = image::load_from_memory(&jb)?; // JPEG 解码
-        img.write_to(..., ImageFormat::Png)      // PNG 再编码
+        let img = image::load_from_memory(&jb)?; // JPEG decode
+        img.write_to(..., ImageFormat::Png)      // PNG re-encode
     }
 }).await??;
 \`\`\`
 
-## 优化方向
+## Suggested fix
 
-\`capture_screen()\` 本身已返回 PNG，直接存入 \`ScreenshotCache\`，无需经过 JPEG。只在同一个 \`spawn_blocking\` 内做一次 PNG→JPEG 编码供响应使用，即可将 4 次图像操作降为 1 次，并消除第二个 \`spawn_blocking\`。`,
+\`capture_screen()\` already returns PNG — store it directly in \`ScreenshotCache\` without going through JPEG. Perform only one PNG→JPEG encode inside the single \`spawn_blocking\` for the response, reducing 4 image operations to 1 and eliminating the second \`spawn_blocking\`.`,
     },
     {
-      title: 'perf(image-cache): ImageCache::get() 使用 VecDeque 线性扫描，查找为 O(n)',
-      body: `## 问题
+      title: 'perf(image-cache): ImageCache::get() uses VecDeque linear scan, O(n) lookup',
+      body: `## Problem
 
 \`crates/tday-nativecore/src/session/image_cache.rs\` L37–44
 
 \`\`\`rust
 pub fn get(&mut self, id: &str) -> Option<CachedImage> {
     if let Some(pos) = self.entries.iter().position(|e| e.id == id) { // O(n)
-        let entry = self.entries.remove(pos)?;   // O(n) 位移
+        let entry = self.entries.remove(pos)?;   // O(n) shift
         ...
     }
 }
 \`\`\`
 
-每次 \`find_image\` 调用都触发一次 O(n) 扫描 + O(n) \`remove\`（VecDeque 内部元素位移）。
+Every \`find_image\` call triggers an O(n) scan + O(n) \`remove\` (VecDeque element shift).
 
-## 优化方向
+## Suggested fix
 
-增加 \`HashMap<String, usize>\` 作为 id→位置 索引，或改用 \`lru\` crate 的标准 LRU 实现，将查找/驱逐均降为 O(1)。`,
+Add a \`HashMap<String, usize>\` index (id → position), or switch to the \`lru\` crate's standard LRU implementation, to bring both lookup and eviction down to O(1).`,
     },
     {
-      title: 'perf(screenshot-cache): ScreenshotCache::peek() 使用 VecDeque 线性扫描，查找为 O(n)',
-      body: `## 问题
+      title: 'perf(screenshot-cache): ScreenshotCache::peek() uses VecDeque linear scan, O(n) lookup',
+      body: `## Problem
 
 \`crates/tday-nativecore/src/session/screenshot_cache.rs\` L48
 
 \`\`\`rust
 pub fn peek(&self, id: &str) -> Option<&CachedScreenshot> {
-    self.entries.iter().find(|e| e.id == id) // O(n) 每次调用
+    self.entries.iter().find(|e| e.id == id) // O(n) on every call
 }
 \`\`\`
 
-每次 \`find_image\`、\`resolve_screenshot_png\` 都要 O(n) 遍历整个截图缓存。
+Every \`find_image\` and \`resolve_screenshot_png\` call performs an O(n) scan of the entire screenshot cache.
 
-## 优化方向
+## Suggested fix
 
-增加 \`HashMap<String, usize>\` 索引，或使用 \`lru\` crate，将查找降为 O(1)。`,
+Add a \`HashMap<String, usize>\` index, or use the \`lru\` crate, to bring lookup down to O(1).`,
     },
     {
-      title: 'perf(find-image): 无搜索区域时克隆完整截图（~15 MB Retina 图像）',
-      body: `## 问题
+      title: 'perf(find-image): Clones full screenshot (~15 MB Retina image) when no search region is specified',
+      body: `## Problem
 
 \`crates/tday-nativecore/src/find_image.rs\` L88–92
 
 \`\`\`rust
 let search_view = if sr_x == 0 && sr_y == 0 && sr_w == ss_w && sr_h == ss_h {
-    screenshot.clone()  // ← 克隆整张图！Retina 全屏约 15 MB
+    screenshot.clone()  // ← clones the entire image! ~15 MB on Retina
 } else {
     image::imageops::crop_imm(...)
 };
 \`\`\`
 
-Retina 全屏截图（5000×3000 灰度）约 15 MB，每次无区域的 \`find_image\` 调用都完整复制一份。
+A Retina full-screen capture (5000×3000 grayscale) is ~15 MB. Every region-less \`find_image\` call copies it in full.
 
-## 优化方向
+## Suggested fix
 
-改用 \`Cow<GrayImage>\`：无区域时持有引用，有裁剪区域时才持有拥有值，避免无谓拷贝。`,
+Use \`Cow<GrayImage>\`: hold a reference when no region is specified, and only take ownership when a crop is needed, eliminating the unnecessary copy.`,
     },
     {
-      title: 'perf(find-image): 模板缩放使用 Lanczos3 滤波，比 Bilinear 慢 3–5 倍且无必要',
-      body: `## 问题
+      title: 'perf(find-image): Template scaling uses Lanczos3 filter, 3–5× slower than Bilinear with no benefit for template matching',
+      body: `## Problem
 
 \`crates/tday-nativecore/src/find_image.rs\` L137–138
 
 \`\`\`rust
 let scaled_t = image::imageops::resize(ref_t, new_w, new_h,
-    image::imageops::FilterType::Lanczos3); // 最高质量，最慢
+    image::imageops::FilterType::Lanczos3); // highest quality, slowest
 \`\`\`
 
-多尺度搜索（默认 5 个 scale × 1 个 rotation）每次 \`find_image\` 调用做 5 次 Lanczos3 缩放。对于 NCC 模板匹配，Lanczos3 的亚像素精度提升对最终得分的影响可忽略不计。
+Multi-scale search (default 5 scales × 1 rotation) performs 5 Lanczos3 resizes per \`find_image\` call. For NCC template matching, Lanczos3's sub-pixel accuracy improvement has negligible impact on the final score.
 
-## 优化方向
+## Suggested fix
 
-改为 \`FilterType::Triangle\`（双线性）或 \`FilterType::CatmullRom\`。在模板匹配场景下质量差异<0.1%，速度可提升 3–5 倍。`,
+Switch to \`FilterType::Triangle\` (bilinear) or \`FilterType::CatmullRom\`. Quality difference is <0.1% in template-matching scenarios, while speed improves 3–5×.`,
     },
     {
-      title: 'perf(find-image): precompute_template 分配不必要的 Vec<f64> 中间缓冲区',
-      body: `## 问题
+      title: 'perf(find-image): precompute_template allocates an unnecessary Vec<f64> intermediate buffer',
+      body: `## Problem
 
 \`crates/tday-nativecore/src/find_image.rs\` L195–203
 
 \`\`\`rust
 fn precompute_template(t: &GrayImage, mask: ...) -> TemplateVals {
-    let pixels: Vec<f64> = (...).map(...).collect(); // ← 全部像素收集进 Vec
+    let pixels: Vec<f64> = (...).map(...).collect(); // ← collects all pixels into a Vec
     let mean = pixels.iter().sum::<f64>() / pixels.len() as f64;
     let norm = pixels.iter().map(|&v| (v - mean).powi(2)).sum::<f64>().sqrt();
     ...
 }
 \`\`\`
 
-每个 scale/rotation 组合都触发此分配。100×100 模板 = 10,000 个 f64 = 80 KB 堆分配，且扫描两遍。
+This allocation is triggered for every scale/rotation combination. A 100×100 template = 10,000 f64 values = 80 KB heap allocation, iterated twice.
 
-## 优化方向
+## Suggested fix
 
-用 Welford 在线算法（单遍）或两遍迭代器（不收集）直接在像素流上计算均值和方差，完全消除中间 Vec 分配。`,
+Use Welford's online algorithm (single pass) or two iterator passes (without collecting) to compute mean and variance directly on the pixel stream, eliminating the intermediate Vec entirely.`,
     },
     {
-      title: 'perf(find-image): ncc_at 每个候选位置都从头计算窗口均值，缺少积分图（Summed Area Table）优化',
-      body: `## 问题
+      title: 'perf(find-image): ncc_at recomputes window mean from scratch at every candidate position — missing Summed Area Table optimization',
+      body: `## Problem
 
 \`crates/tday-nativecore/src/find_image.rs\` L206–235
 
-\`ncc_at\` 对截图中每个候选位置 (ox, oy) 都完整遍历模板大小的窗口来计算滑动均值：
+\`ncc_at\` fully traverses a template-sized window for every candidate position (ox, oy) to compute the sliding mean:
 
 \`\`\`rust
 for y in 0..th { for x in 0..tw {
@@ -183,208 +183,208 @@ for y in 0..th { for x in 0..tw {
 }}
 \`\`\`
 
-整体复杂度为 O(W × H × tw × th)。对 5000×3000 截图、100×100 模板：约 1500 亿次操作（stride=1）。
+Overall complexity: O(W × H × tw × th). For a 5000×3000 screenshot with a 100×100 template: ~150 billion operations at stride=1.
 
-## 优化方向
+## Suggested fix
 
-构建 Summed-Area Table（积分图），将滑动窗口均值从 O(tw×th) 降为 O(1)，整体扫描复杂度从 O(W·H·tw·th) 降为 O(W·H)。这是模板匹配的标准加速方案，可带来数量级性能提升。`,
+Build a Summed-Area Table (integral image) to reduce sliding-window mean from O(tw×th) to O(1), bringing overall scan complexity from O(W·H·tw·th) down to O(W·H). This is the standard acceleration technique for template matching and can yield order-of-magnitude speedups.`,
     },
     {
-      title: 'perf(hover-tracker): element_at_point_for_hover 将 ElementInfo 序列化为 JSON 再解析回 HoverElement',
-      body: `## 问题
+      title: 'perf(hover-tracker): element_at_point_for_hover serializes ElementInfo to JSON then parses it back to HoverElement',
+      body: `## Problem
 
 \`crates/tday-nativecore/src/tracking/hover_tracker.rs\` L263–267
 
 \`\`\`rust
 fn element_at_point_for_hover(x, y, app_name) -> Result<HoverElement, String> {
-    let info = crate::platform::element_at_point(x, y, app_name)?; // 已有结构体
-    let value = serde_json::to_value(&info).map_err(...)?;          // 序列化成 JSON Value
-    Ok(parse_hover_element(&value))                                  // 再从 JSON Value 解析回来
+    let info = crate::platform::element_at_point(x, y, app_name)?; // already a struct
+    let value = serde_json::to_value(&info).map_err(...)?;          // serialize to JSON Value
+    Ok(parse_hover_element(&value))                                  // parse back to HoverElement
 }
 \`\`\`
 
-悬停跟踪默认每 200ms 轮询一次，每次都做一次无意义的 \`ElementInfo → serde_json::Value → HoverElement\` 往返。
+Hover tracking polls by default every 200ms, performing a pointless \`ElementInfo → serde_json::Value → HoverElement\` round-trip on each tick.
 
-## 优化方向
+## Suggested fix
 
-实现 \`From<ElementInfo> for HoverElement\`（或 \`impl HoverElement { fn from_info(info: &ElementInfo) -> Self }\`），直接字段赋值，消除 serde 往返。`,
+Implement \`From<ElementInfo> for HoverElement\` (or \`impl HoverElement { fn from_info(info: &ElementInfo) -> Self }\`) to assign fields directly, eliminating the serde round-trip.`,
     },
     {
-      title: 'perf(ax-snapshot): relabel_uids 对已序列化的完整 JSON 树做第二次递归遍历',
-      body: `## 问题
+      title: 'perf(ax-snapshot): relabel_uids performs a second recursive traversal of the fully-serialized JSON tree',
+      body: `## Problem
 
 \`crates/tday-nativecore/src/handlers/ax.rs\` L39–42
 
 \`\`\`rust
 let root_json = relabel_uids(
-    serde_json::to_value(&root)?,  // 先序列化整棵树
-    gen                             // 再递归遍历重写所有 uid 字段
+    serde_json::to_value(&root)?,  // serialize the entire tree first
+    gen                             // then recursively rewrite all uid fields
 );
 \`\`\`
 
-10,000 节点的 AX 树会经历两次完整遍历：一次 serde 序列化，一次 \`relabel_uids\` JSON 递归。注释也说明了原因：「snapshot builder 使用 g0 占位，事后才知道 generation」。
+A 10,000-node AX tree undergoes two full traversals: one serde serialization pass and one \`relabel_uids\` JSON recursion. The comment explains why: "snapshot builder uses g0 as a placeholder; generation is only known afterwards."
 
-## 优化方向
+## Suggested fix
 
-在 \`snapshot_element\` 构建阶段传入 \`generation\` 参数，直接生成正确的 UID（\`a{n}g{gen}\`），彻底消除 \`relabel_uids\` 函数和第二次 JSON 树遍历。`,
+Pass the \`generation\` parameter into \`snapshot_element\` at build time so it can generate the correct UID (\`a{n}g{gen}\`) directly, eliminating \`relabel_uids\` and the second JSON tree traversal entirely.`,
     },
     {
-      title: 'perf(ax-find): ax_find 中每个 AX 元素的 AXRole 被读取两次',
-      body: `## 问题
+      title: 'perf(ax-find): AXRole is read twice for each AX element in ax_find',
+      body: `## Problem
 
-\`crates/tday-nativecore/src/platform/macos/ax.rs\` L306 和 L337
+\`crates/tday-nativecore/src/platform/macos/ax.rs\` L306 and L337
 
-在 \`ax_find\` 的 walk_tree 回调中，AXRole 被获取了两次：
+Inside the \`ax_find\` walk_tree callback, AXRole is fetched twice:
 
 \`\`\`rust
-// L306 - 用于 role 过滤
+// L306 - for role filtering
 let role = get_string(el, "AXRole").unwrap_or_else(|| "unknown".into());
 
-// ... 过滤逻辑 ...
+// ... filter logic ...
 
-// L337 - 再次获取 role 来构建 AXNode
+// L337 - fetched again to build AXNode
 let role  = get_string(el, "AXRole").unwrap_or_else(|| "unknown".into());
 \`\`\`
 
-每次 \`AXUIElementCopyAttributeValue\` 调用都有 IPC 开销（跨进程 mach port 通信）。
+Each \`AXUIElementCopyAttributeValue\` call has IPC overhead (cross-process mach port communication).
 
-## 优化方向
+## Suggested fix
 
-只获取一次 AXRole，在两处复用同一变量。`,
+Fetch AXRole once and reuse the same variable in both places.`,
     },
     {
-      title: 'perf(screen-recorder): 每帧都克隆 app_name_cache HashMap 并调用 list_windows()',
-      body: `## 问题
+      title: 'perf(screen-recorder): Clones app_name_cache HashMap and calls list_windows() on every frame',
+      body: `## Problem
 
 \`crates/tday-nativecore/src/tracking/screen_recorder.rs\` L117, L148
 
-录屏循环（最高 5fps）每一帧都：
-1. \`app_name_cache.clone()\` — 克隆整个 PID→AppName HashMap
-2. \`crate::platform::list_windows()\` — 枚举所有窗口（CoreGraphics/WinAPI 调用）
+The recording loop (up to 5 fps) does on every frame:
+1. \`app_name_cache.clone()\` — clones the entire PID→AppName HashMap
+2. \`crate::platform::list_windows()\` — enumerates all windows (CoreGraphics/WinAPI call)
 
 \`\`\`rust
-let app_cache_snapshot = app_name_cache.clone(); // 每帧克隆
+let app_cache_snapshot = app_name_cache.clone(); // cloned every frame
 let result = tokio::task::spawn_blocking(move || {
-    let windows = crate::platform::list_windows()?; // 每帧枚举所有窗口
+    let windows = crate::platform::list_windows()?; // enumerated every frame
     ...
 }).await;
 \`\`\`
 
-## 优化方向
+## Suggested fix
 
-1. 用 \`Arc<Mutex<HashMap>>\` 替代克隆，spawn_blocking 内通过锁读取。
-2. 缓存上一帧的前台窗口 ID，只在 \`list_windows()\` 检测到前台变化时才重新查询。`,
+1. Replace the clone with \`Arc<Mutex<HashMap>>\` so spawn_blocking reads via lock instead of copying.
+2. Cache the previous frame's foreground window ID and only re-query \`list_windows()\` when the foreground changes.`,
     },
     {
-      title: 'perf(ax-tree): AX 属性名称字符串（CFString）在每次树遍历时重复分配',
-      body: `## 问题
+      title: 'perf(ax-tree): AX attribute name CFStrings are re-allocated on every tree traversal',
+      body: `## Problem
 
 \`crates/tday-nativecore/src/platform/macos/ax.rs\` L507, L514–515
 
-\`ax_children\`、\`get_string\`、\`get_bool\`、\`get_ax_value\` 等辅助函数每次调用都动态分配一个 \`CFString\`：
+Helper functions like \`ax_children\`, \`get_string\`, \`get_bool\`, and \`get_ax_value\` allocate a new \`CFString\` on every call:
 
 \`\`\`rust
 unsafe fn get_string(el: AXUIElementRef, attr_name: &str) -> Option<String> {
-    let attr = CFString::new(attr_name); // ← 每次调用都分配
+    let attr = CFString::new(attr_name); // ← allocates on every call
     ...
 }
 \`\`\`
 
-10,000 节点的 AX 树快照，每个节点调用 5–8 次 \`get_string\`/\`get_bool\`，累计约 50,000–80,000 次 CFString 堆分配。
+A 10,000-node AX tree snapshot calls \`get_string\`/\`get_bool\` 5–8 times per node, totalling ~50,000–80,000 CFString heap allocations per snapshot.
 
-## 优化方向
+## Suggested fix
 
-将常用属性名（\`AXRole\`、\`AXTitle\`、\`AXValue\`、\`AXDescription\`、\`AXEnabled\`、\`AXFocused\`、\`AXChildren\`、\`AXPosition\`、\`AXSize\`）声明为全局 \`lazy_static\` 或 \`once_cell::sync::Lazy<CFString>\`，在进程生命周期内复用。`,
+Declare commonly used attribute names (\`AXRole\`, \`AXTitle\`, \`AXValue\`, \`AXDescription\`, \`AXEnabled\`, \`AXFocused\`, \`AXChildren\`, \`AXPosition\`, \`AXSize\`) as global \`lazy_static\` or \`once_cell::sync::Lazy<CFString>\` constants and reuse them for the lifetime of the process.`,
     },
     {
-      title: 'perf(history-scanner): readFileSync 读取完整会话文件，但只需要前 150 行',
-      body: `## 问题
+      title: 'perf(history-scanner): readFileSync reads the entire session file when only the first 150 lines are needed',
+      body: `## Problem
 
-\`apps/desktop/src/main/agent-history/scanners.ts\` 及 \`apps/desktop/src/main/usage/session-readers/\` 各文件
+\`apps/desktop/src/main/agent-history/scanners.ts\` and files under \`apps/desktop/src/main/usage/session-readers/\`
 
-所有 scanner 都读取完整的 JSONL 文件后再截断：
+All scanners read the complete JSONL file before truncating:
 
 \`\`\`typescript
-const content = readFileSync(filePath, 'utf8'); // 可能几 MB
+const content = readFileSync(filePath, 'utf8'); // potentially several MB
 // ...
 for (const line of content.split('\\n')) {
-    if (lineIdx++ > MAX_TITLE_SCAN_LINES) break; // 只取前 150 行
+    if (lineIdx++ > MAX_TITLE_SCAN_LINES) break; // only use the first 150 lines
 }
 \`\`\`
 
-Claude-code / Codex 会话文件包含大量工具调用结果和代码内容，单文件可达数 MB。拥有数百个会话的安装，每次历史刷新会将 GB 级数据读入内存再丢弃。
+Claude-code / Codex session files can reach several MB due to tool call results and code content. Installations with hundreds of sessions read GB of data into memory on every history refresh, only to discard most of it.
 
-## 优化方向
+## Suggested fix
 
-使用 \`readline.createInterface({ input: fs.createReadStream(filePath) })\` 逐行读取，到达 150 行后调用 \`rl.close()\` 停止，可减少 I/O 量超过 90%。`,
+Use \`readline.createInterface({ input: fs.createReadStream(filePath) })\` to read line-by-line and call \`rl.close()\` after 150 lines. This can reduce I/O by more than 90%.`,
     },
     {
-      title: 'perf(session-cache): 脏检测后再次调用 collectFiles()，重复 stat 系统调用',
-      body: `## 问题
+      title: 'perf(session-cache): collectFiles() called again after dirty check, duplicating stat syscalls',
+      body: `## Problem
 
-\`apps/desktop/src/main/usage/session-cache.ts\` L211–218 和 L317–319
+\`apps/desktop/src/main/usage/session-cache.ts\` L211–218 and L317–319
 
-\`isAgentDirty\` 已经调用了一次 \`watcher.collectFiles()\` 来获取文件列表，但在 dirty 分支中重新扫描后，又调用了一次来更新水印：
+\`isAgentDirty\` already calls \`watcher.collectFiles()\` to obtain the file list, but after re-scanning in the dirty branch it calls it again to update the watermark:
 
 \`\`\`typescript
-// L211-218 - 第一次
+// L211-218 - first call
 function isAgentDirty(watcher, index) {
-  const files = watcher.collectFiles(); // stat 所有文件
+  const files = watcher.collectFiles(); // stat all files
   ...
 }
 
-// L317-319 - 第二次（相同文件）
-const files = watcher.collectFiles(); // ← 重复 stat
+// L317-319 - second call (same files)
+const files = watcher.collectFiles(); // ← duplicate stat
 const { fileCount, maxMtime } = statFiles(files);
 \`\`\`
 
-对于有数百个会话文件的代理（如 codex），每次刷新会对同一组文件做两遍 stat 遍历。
+For agents with hundreds of session files (e.g. codex), every refresh stat-walks the same file set twice.
 
-## 优化方向
+## Suggested fix
 
-将 \`isAgentDirty\` 改为返回 \`{ dirty: boolean; files: FileWithMtime[] }\`，在 dirty 分支中直接复用已 stat 的文件列表。`,
+Change \`isAgentDirty\` to return \`{ dirty: boolean; files: FileWithMtime[] }\` and reuse the already-stat'd file list directly in the dirty branch.`,
     },
     {
-      title: 'perf(usage-store): computeUsageSummary 每次调用都从磁盘重新读取 pricing.json',
-      body: `## 问题
+      title: 'perf(usage-store): computeUsageSummary re-reads pricing.json from disk on every call',
+      body: `## Problem
 
 \`apps/desktop/src/main/usage/store.ts\` L38–40, L67–68
 
 \`\`\`typescript
 function mergedPricing(): Record<string, ModelPricing> {
-  return { ...BUILTIN_PRICING, ...loadUserPricing() }; // 每次都读磁盘
+  return { ...BUILTIN_PRICING, ...loadUserPricing() }; // reads disk every time
 }
 
 export function computeUsageSummary(records: UsageRecord[]): UsageSummary {
-  const pricing = mergedPricing(); // ← 触发 readFileSync
+  const pricing = mergedPricing(); // ← triggers readFileSync
   ...
 }
 \`\`\`
 
-\`queryUsage\`（IPC handler）在每次查询时调用 \`computeUsageSummary\`，每次都通过 \`readFileSync\` 读取 \`~/.tday/pricing.json\`。
+\`queryUsage\` (the IPC handler) calls \`computeUsageSummary\` on every query, causing a \`readFileSync\` of \`~/.tday/pricing.json\` on every request.
 
-## 优化方向
+## Suggested fix
 
-用模块级变量缓存 merged pricing，并监听文件变化（\`fs.watch\`）或在 \`setSetting\` 时失效，避免每次查询都读磁盘。`,
+Cache the merged pricing in a module-level variable and invalidate it via \`fs.watch\` on the pricing file, or on each \`setSetting\` call, to avoid reading from disk on every query.`,
     },
     {
-      title: 'perf(usage-store): Math.max(...tsValues) spread 在大记录集下会溢出 V8 函数参数栈',
-      body: `## 问题
+      title: 'perf(usage-store): Math.max(...tsValues) spread overflows V8 argument stack on large record sets',
+      body: `## Problem
 
 \`apps/desktop/src/main/usage/store.ts\` L153–154
 
 \`\`\`typescript
-const tsValues = records.map((r) => r.ts); // 中间数组
+const tsValues = records.map((r) => r.ts); // intermediate array
 const spanMs = tsValues.length > 1
   ? Math.max(...tsValues) - Math.min(...tsValues) // ← spread
   : 0;
 \`\`\`
 
-\`Math.max(...array)\` 通过 spread 将数组元素作为函数参数传入。V8 的函数调用参数上限约为 65,536。当 \`records\` 超过此数量时，会抛出 \`RangeError: Maximum call stack size exceeded\`。
+\`Math.max(...array)\` passes array elements as function arguments via spread. V8's function call argument limit is ~65,536. When \`records\` exceeds that count, a \`RangeError: Maximum call stack size exceeded\` is thrown.
 
-## 优化方向
+## Suggested fix
 
-用 \`reduce\` 或 \`for\` 循环替代 spread：
+Replace the spread with a \`reduce\` or \`for\` loop:
 
 \`\`\`typescript
 let minTs = Infinity, maxTs = -Infinity;
@@ -394,43 +394,43 @@ for (const r of records) {
 }
 \`\`\`
 
-同时消除中间 \`tsValues\` 数组分配，节省一次 O(n) 遍历。`,
+This also eliminates the intermediate \`tsValues\` array allocation, saving one O(n) pass.`,
     },
     {
-      title: 'perf(usage-store): loadUsageRecords 将完整 usage.jsonl 文件读入内存再过滤',
-      body: `## 问题
+      title: 'perf(usage-store): loadUsageRecords reads the entire usage.jsonl into memory before filtering',
+      body: `## Problem
 
 \`apps/desktop/src/main/usage/store.ts\` L176–193
 
 \`\`\`typescript
 const lines = readFileSync(USAGE_FILE, 'utf8').split('\\n').filter(Boolean);
-// 然后 for 循环应用 fromTs/toTs/agentId 过滤
+// then a for-loop applies fromTs/toTs/agentId filters
 \`\`\`
 
-\`usage.jsonl\` 随时间增长（注释说 10,000 次请求 ≈ 1–2 MB），但每次查询都把整个文件读入内存、解析所有行、再丢弃大部分。对于时间范围过滤（如「今天的用量」），绝大多数记录都被丢弃。
+\`usage.jsonl\` grows over time (the comment notes ~1–2 MB per 10,000 requests), but every query reads the entire file into memory, parses all lines, then discards most of them. For time-range queries such as "today's usage," the vast majority of records are thrown away.
 
-## 优化方向
+## Suggested fix
 
-维护一个按时间戳排序的内存索引（行偏移量 → ts），利用二分查找快速定位 fromTs 范围起点，仅读取和解析相关行段。或者对大文件改用流式读取。`,
+Maintain an in-memory index sorted by timestamp (line offset → ts) and use binary search to locate the \`fromTs\` starting point, reading and parsing only the relevant segment. Alternatively, switch to streaming reads for large files.`,
     },
     {
-      title: 'perf(input): stripReasoningContent 对整个输入数组调用 JSON.stringify 来检查字段是否存在',
-      body: `## 问题
+      title: 'perf(input): stripReasoningContent calls JSON.stringify on the entire input array just to check field existence',
+      body: `## Problem
 
 \`apps/desktop/src/main/gateway/bridge/input.ts\` L236–246
 
 \`\`\`typescript
 export function stripReasoningContent(input: unknown): unknown {
   if (!Array.isArray(input)) return input;
-  const str = JSON.stringify(input);                       // ← 序列化整个对话历史
-  if (!str.includes('reasoning_content')) return input;   // 只是检查字段是否存在
+  const str = JSON.stringify(input);                       // ← serializes entire conversation history
+  if (!str.includes('reasoning_content')) return input;   // only checks for field existence
   return input.map((item) => { ... });
 }
 \`\`\`
 
-对话历史可能包含数十轮消息和大段代码/工具输出，但这里只是想检查是否有 \`reasoning_content\` 字段。序列化整个数组只是为了一个字符串包含检查。
+The conversation history can contain dozens of message turns and large blocks of code or tool output, yet this code serializes the whole array just to perform a substring check for a field name.
 
-## 优化方向
+## Suggested fix
 
 \`\`\`typescript
 if (!Array.isArray(input) || !input.some(
@@ -438,18 +438,18 @@ if (!Array.isArray(input) || !input.some(
 )) return input;
 \`\`\`
 
-完全消除 \`JSON.stringify\`，直接对象属性检查，早退性能更好。`,
+Eliminates \`JSON.stringify\` entirely; direct property access short-circuits as soon as a match is found.`,
     },
     {
-      title: 'perf(thinking-state): ThinkingState.prune() 使用 O(n) 的 Array.shift()，每次驱逐开销为线性',
-      body: `## 问题
+      title: 'perf(thinking-state): ThinkingState.prune() uses O(n) Array.shift(), making each eviction linear-cost',
+      body: `## Problem
 
 \`apps/desktop/src/main/gateway/deepseek/state.ts\` L114–123
 
 \`\`\`typescript
 private prune(): void {
   while (this.recordOrder.length > this.limit) {
-    const id = this.recordOrder.shift()!; // O(n) 数组左移
+    const id = this.recordOrder.shift()!; // O(n) left-shift
     this.records.delete(id);
   }
   while (this.textOrder.length > this.limit) {
@@ -459,34 +459,34 @@ private prune(): void {
 }
 \`\`\`
 
-\`Array.shift()\` 是 O(n) 操作，每次插入新条目时都要移动整个数组。默认 limit 为 1024，在频繁工具调用场景下频繁触发。
+\`Array.shift()\` is an O(n) operation that shifts every remaining element on each eviction. With a default limit of 1024, this fires frequently during heavy tool-call workloads.
 
-## 优化方向
+## Suggested fix
 
-用循环索引（ring buffer）或 \`index: number\` 指针替代 \`shift()\`，将 prune 降为 O(1)。或使用双端队列（如 \`denque\` 包）。`,
+Replace \`shift()\` with a circular index (ring buffer) or an \`index: number\` pointer to bring prune down to O(1). Alternatively, use a proper deque such as the \`denque\` package.`,
     },
     {
-      title: 'perf(adapter): CodexDeepSeekAnthropicAdapter.conversations Map 无限增长，缺少 LRU 驱逐',
-      body: `## 问题
+      title: 'perf(adapter): CodexDeepSeekAnthropicAdapter.conversations Map grows unbounded — missing LRU eviction',
+      body: `## Problem
 
 \`apps/desktop/src/main/gateway/adapter.ts\` L64–65
 
 \`\`\`typescript
 export class CodexDeepSeekAnthropicAdapter implements GatewayAdapter {
-  private readonly conversations = new Map<string, AMessage[]>(); // 永不清理
+  private readonly conversations = new Map<string, AMessage[]>(); // never cleaned up
   private readonly thinkingStates = new Map<string, ThinkingState>();
 }
 \`\`\`
 
-每次新请求的 \`responseId\` 都被存入 \`conversations\`，但从不驱逐。长时间运行的 Codex 会话（数百轮）会将每个 \`previous_response_id\` 的完整消息历史都保留在内存中，导致 Node.js 进程内存持续增长。\`thinkingStates\` 同理。
+Every new request's \`responseId\` is stored in \`conversations\` but never evicted. Long-running Codex sessions (hundreds of turns) retain the full message history for every \`previous_response_id\`, causing continuous Node.js process memory growth. \`thinkingStates\` has the same issue.
 
-## 优化方向
+## Suggested fix
 
-对两个 Map 都加上 LRU 驱逐（例如 limit=500 条）。可使用 Map 的插入顺序特性自行实现，或引入 \`lru-cache\` 包。`,
+Add LRU eviction to both Maps (e.g. limit=500 entries). This can be implemented manually using Map's insertion-order property, or by introducing the \`lru-cache\` package.`,
     },
     {
-      title: 'perf(agent-history): isDirty 中使用 Math.max(...files.map(...)) spread，大量会话时可能栈溢出',
-      body: `## 问题
+      title: 'perf(agent-history): Math.max(...files.map(...)) spread in isDirty can stack-overflow with many sessions',
+      body: `## Problem
 
 \`apps/desktop/src/main/agent-history/index.ts\` L120
 
@@ -496,19 +496,19 @@ const maxMtime = files.length > 0
   : 0;
 \`\`\`
 
-与 \`usage/store.ts\` 的同类问题一致：\`Math.max(...array)\` 通过 spread 传参，当 files 数组超过 ~65,536 时（大型 Codex 安装）会抛出 \`RangeError\`。
+Same class of bug as in \`usage/store.ts\`: \`Math.max(...array)\` passes elements as function arguments via spread. When the files array exceeds ~65,536 entries (large Codex installs), a \`RangeError\` is thrown.
 
-## 优化方向
+## Suggested fix
 
 \`\`\`typescript
 const maxMtime = files.reduce((m, f) => f.mtime > m ? f.mtime : m, 0);
 \`\`\`
 
-同时消除中间 \`map\` 数组分配。同一模式在 \`session-cache.ts\` L318 中也存在，应一并修复。`,
+This also eliminates the intermediate \`map\` array. The same pattern exists in \`session-cache.ts\` L318 and should be fixed there too.`,
     },
     {
-      title: 'perf(history-store): saveStore 使用 JSON.stringify 带 2 空格缩进，导致文件体积翻倍',
-      body: `## 问题
+      title: 'perf(history-store): saveStore uses JSON.stringify with 2-space indent, bloating file size by 30–50%',
+      body: `## Problem
 
 \`apps/desktop/src/main/agent-history/store.ts\` L78
 
@@ -519,11 +519,11 @@ export function saveStore(store: HistoryStore): void {
 }
 \`\`\`
 
-每次历史刷新完成后都将整个历史索引以带 2 空格缩进的格式序列化后写盘。对于数百条历史条目，pretty-print 会导致文件体积增大 30–50%，写盘时间增加（更多字节）且内存中持有更大的字符串。
+After every history refresh, the entire history index is serialized with 2-space indentation and written to disk. For hundreds of history entries, pretty-printing inflates file size by 30–50%, increases write time (more bytes), and holds a larger string in memory.
 
-## 优化方向
+## Suggested fix
 
-改为 \`JSON.stringify(store)\`（无缩进）。历史索引是机器读取的，人类可读性不重要。\`settings-store.ts\` 相关的写盘如果也有 \`null, 2\`，也应一并优化。`,
+Use \`JSON.stringify(store)\` (no indentation). The history index is machine-read; human readability is not a requirement. Any \`null, 2\` occurrences in \`settings-store.ts\` writes should be fixed the same way.`,
     },
   ];
 
