@@ -93,7 +93,7 @@ export function AgentsSection({
   };
 
   const setAgentBin = (agentId: string, bin: string) => {
-    const next = agents.map((a) => (a.id === agentId ? { ...a, bin: bin || undefined } : a));
+    const next = agents.map((a) => (a.id === agentId ? { ...a, bin: bin.trim() || undefined } : a));
     onAgentsChange(next);
   };
 
@@ -344,7 +344,7 @@ export function AgentsSection({
                   ) : null}
                 </div>
                 {a.resolvedPath ? (
-                  <div className="mt-0.5 truncate text-[10px] text-zinc-600" title={a.resolvedPath}>
+                  <div className="mt-0.5 truncate text-[11px] text-zinc-500" title={a.resolvedPath}>
                     {a.resolvedPath}
                   </div>
                 ) : null}
