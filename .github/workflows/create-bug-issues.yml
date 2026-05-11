@@ -2,6 +2,11 @@ name: Create Bug Issues
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - copilot/create-issues-for-all-bugs
+    paths:
+      - '.github/workflows/create-bug-issues.yml'
 
 jobs:
   create-issues:
