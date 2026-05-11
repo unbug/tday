@@ -1,0 +1,23 @@
+name: Create Bug Issues (P0/P1 Round 2)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - copilot/create-issues-for-all-bugs
+    paths:
+      - '.github/workflows/create-bug-issues-p0p1.yml'
+      - '.github/scripts/create-issues-p0p1-round2.js'
+
+jobs:
+  create-issues:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create all P0/P1 bug issues (round 2)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node .github/scripts/create-issues-p0p1-round2.js
