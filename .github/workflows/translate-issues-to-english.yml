@@ -2,6 +2,9 @@ name: Translate Chinese Issues to English
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - copilot/translate-issues-to-english
 
 permissions:
   issues: write
