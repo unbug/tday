@@ -584,7 +584,7 @@
   <p>Free and open source — pick your platform below</p>
   <div class="platform-cards">
     <div class="platform-card">
-      <span class="platform-icon"></span>
+      <span class="platform-icon">🍎</span>
       <span class="platform-name">macOS</span>
       <span class="platform-formats">arm64 · x64 · .dmg</span>
     </div>
@@ -631,7 +631,7 @@
     var isLinux = /Linux/.test(platform) && !isMac;
 
     if (isMac) {
-      var isArm = /arm64|aarch64/i.test(ua) || (typeof navigator.userAgentData !== 'undefined');
+      var isArm = /arm64|aarch64/i.test(ua);
       nameEl.textContent = isArm ? 'macOS (Apple Silicon)' : 'macOS';
       hint.textContent = 'Downloads a .dmg installer · macOS arm64 + x64 available';
     } else if (isWin) {
