@@ -208,7 +208,7 @@ function registerIpc(): void {
     // Validate tabId early — it is used to construct file paths and must not
     // contain path-traversal sequences (e.g. '../', '/', null bytes).
     if (!/^[\w-]+$/.test(req.tabId)) {
-      throw new Error(`[tday] Invalid tabId — must be alphanumeric/hyphen/underscore: "${req.tabId}"`);
+      throw new Error(`[tday] Invalid tabId — must match [a-zA-Z0-9_-]: "${req.tabId}"`);
     }
 
     const existing = ptys.get(req.tabId);

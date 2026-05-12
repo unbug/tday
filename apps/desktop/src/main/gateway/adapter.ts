@@ -72,8 +72,8 @@ class BoundedMap<K, V> extends Map<K, V> {
     // updated (most-recently-used semantics).
     if (this.has(key)) this.delete(key);
     super.set(key, value);
-    // Evict oldest entries until we are within the size limit.
-    while (this.size > this.maxSize) {
+    // Each set() adds at most one entry, so a single eviction step suffices.
+    if (this.size > this.maxSize) {
       const oldest = this.keys().next().value;
       if (oldest !== undefined) this.delete(oldest);
     }
