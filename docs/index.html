@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- Primary SEO -->
+  <title>Tday — All-in-One AI Coding Agent Terminal</title>
+  <meta name="description" content="Tday is a free, open-source terminal harness for every AI coding agent — Claude Code, Codex CLI, GitHub Copilot CLI, Gemini CLI, OpenCode, Pi, and more. Multi-tab workspace, Computer Use, cross-agent analytics. Runs on macOS, Windows, and Linux." />
+  <meta name="keywords" content="AI terminal, Claude Code, Codex CLI, GitHub Copilot CLI, Gemini CLI, OpenCode, AI coding agent, computer use, multi-tab terminal, macOS, Windows, Linux, open source, free" />
+  <meta name="author" content="unbug" />
+  <link rel="canonical" href="https://unbug.github.io/tday/" />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://unbug.github.io/tday/" />
+  <meta property="og:title" content="Tday — All-in-One AI Coding Agent Terminal" />
+  <meta property="og:description" content="One terminal for every coding-agent harness — Claude Code, Codex, Copilot CLI, Gemini CLI, OpenCode, Pi, and more. Multi-tab, Computer Use, cross-platform." />
+  <meta property="og:image" content="https://github.com/user-attachments/assets/ba6c8041-173f-44bb-90d6-cd72071260df" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="800" />
+  <meta property="og:site_name" content="Tday" />
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:site" content="@unbug" />
+  <meta name="twitter:title" content="Tday — All-in-One AI Coding Agent Terminal" />
+  <meta name="twitter:description" content="One terminal for every coding-agent harness — Claude Code, Codex, Copilot CLI, Gemini CLI, OpenCode, Pi, and more. Multi-tab, Computer Use, cross-platform." />
+  <meta name="twitter:image" content="https://github.com/user-attachments/assets/ba6c8041-173f-44bb-90d6-cd72071260df" />
+
+  <!-- Structured Data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Tday",
+    "operatingSystem": "macOS, Windows, Linux",
+    "applicationCategory": "DeveloperApplication",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "description": "All-in-One AI coding agent terminal harness. Supports Claude Code, Codex CLI, GitHub Copilot CLI, Gemini CLI, OpenCode, Pi, and more. Features multi-tab workspace, Computer Use, cross-agent analytics.",
+    "url": "https://unbug.github.io/tday/",
+    "downloadUrl": "https://github.com/unbug/tday/releases",
+    "softwareVersion": "0.10.2",
+    "author": {
+      "@type": "Person",
+      "name": "unbug"
+    }
+  }
+  </script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d0f14;
+      --bg2: #131720;
+      --bg3: #1a2030;
+      --border: #2a3347;
+      --text: #e2e8f0;
+      --muted: #8892a4;
+      --accent: #4f8ef7;
+      --accent2: #7c6af7;
+      --green: #3dd68c;
+      --radius: 12px;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: inherit; text-decoration: none; }
+
+    /* ── NAV ── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      height: 56px;
+      background: rgba(13,15,20,.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-logo {
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: .02em;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .nav-links { display: flex; gap: 20px; }
+    .nav-links a {
+      font-size: .875rem;
+      color: var(--muted);
+      transition: color .15s;
+    }
+    .nav-links a:hover { color: var(--text); }
+    .nav-gh {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: .875rem;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 4px 12px;
+      transition: color .15s, border-color .15s;
+    }
+    .nav-gh:hover { color: var(--text); border-color: #4a5568; }
+
+    /* ── HERO ── */
+    .hero {
+      text-align: center;
+      padding: 96px 24px 72px;
+      max-width: 780px;
+      margin: 0 auto;
+    }
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: .78rem;
+      font-weight: 500;
+      color: var(--green);
+      background: rgba(61,214,140,.1);
+      border: 1px solid rgba(61,214,140,.25);
+      border-radius: 999px;
+      padding: 4px 12px;
+      margin-bottom: 24px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .hero h1 {
+      font-size: clamp(2.4rem, 6vw, 3.8rem);
+      font-weight: 800;
+      letter-spacing: -.02em;
+      line-height: 1.15;
+      margin-bottom: 20px;
+    }
+    .hero h1 span {
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero p {
+      font-size: clamp(1rem, 2.5vw, 1.2rem);
+      color: var(--muted);
+      max-width: 600px;
+      margin: 0 auto 40px;
+    }
+    .hero-cta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: center;
+      align-items: center;
+    }
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 600;
+      padding: 12px 28px;
+      border-radius: var(--radius);
+      border: none;
+      cursor: pointer;
+      transition: opacity .15s, transform .15s;
+      text-decoration: none;
+    }
+    .btn-primary:hover { opacity: .88; transform: translateY(-1px); }
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: transparent;
+      color: var(--muted);
+      font-size: .95rem;
+      font-weight: 500;
+      padding: 12px 20px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      cursor: pointer;
+      transition: color .15s, border-color .15s;
+      text-decoration: none;
+    }
+    .btn-secondary:hover { color: var(--text); border-color: #4a5568; }
+    .platform-hint {
+      font-size: .78rem;
+      color: var(--muted);
+      margin-top: 10px;
+      width: 100%;
+      text-align: center;
+    }
+
+    /* ── AGENTS STRIP ── */
+    .agents {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      padding: 0 24px 64px;
+      max-width: 780px;
+      margin: 0 auto;
+    }
+    .agent-chip {
+      font-size: .78rem;
+      font-weight: 500;
+      color: var(--muted);
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 4px 14px;
+    }
+
+    /* ── DEMO IMAGE ── */
+    .demo-wrap {
+      max-width: 1060px;
+      margin: 0 auto 80px;
+      padding: 0 24px;
+    }
+    .demo-wrap a {
+      display: block;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      box-shadow: 0 24px 80px rgba(0,0,0,.5);
+      transition: transform .2s;
+    }
+    .demo-wrap a:hover { transform: translateY(-3px); }
+    .demo-wrap img { width: 100%; display: block; }
+    .demo-caption {
+      text-align: center;
+      margin-top: 12px;
+      font-size: .82rem;
+      color: var(--muted);
+    }
+    .demo-caption a { color: var(--accent); }
+    .demo-caption a:hover { text-decoration: underline; }
+
+    /* ── SCREENSHOTS ── */
+    .screenshots {
+      max-width: 1060px;
+      margin: 0 auto 80px;
+      padding: 0 24px;
+    }
+    .section-label {
+      text-align: center;
+      font-size: .75rem;
+      font-weight: 600;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 16px;
+    }
+    .section-title {
+      text-align: center;
+      font-size: clamp(1.6rem, 3.5vw, 2.2rem);
+      font-weight: 700;
+      letter-spacing: -.015em;
+      margin-bottom: 40px;
+    }
+    .shots-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+    }
+    .shots-grid img {
+      width: 100%;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      display: block;
+      transition: transform .2s, box-shadow .2s;
+    }
+    .shots-grid img:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 12px 40px rgba(0,0,0,.4);
+    }
+
+    /* ── FEATURES ── */
+    .features {
+      max-width: 1060px;
+      margin: 0 auto 80px;
+      padding: 0 24px;
+    }
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+    }
+    .feat {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      transition: border-color .2s;
+    }
+    .feat:hover { border-color: #3a4a64; }
+    .feat-icon {
+      font-size: 1.5rem;
+      margin-bottom: 12px;
+    }
+    .feat h3 {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .feat p {
+      font-size: .875rem;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    /* ── FULL SCREENSHOT ── */
+    .fullshot {
+      max-width: 1060px;
+      margin: 0 auto 80px;
+      padding: 0 24px;
+    }
+    .fullshot img {
+      width: 100%;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      box-shadow: 0 24px 80px rgba(0,0,0,.5);
+    }
+
+    /* ── PLATFORMS ── */
+    .platforms {
+      text-align: center;
+      padding: 72px 24px;
+      background: var(--bg2);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 80px;
+    }
+    .platforms h2 {
+      font-size: clamp(1.6rem, 3.5vw, 2.2rem);
+      font-weight: 700;
+      letter-spacing: -.015em;
+      margin-bottom: 12px;
+    }
+    .platforms p {
+      color: var(--muted);
+      font-size: 1rem;
+      margin-bottom: 36px;
+    }
+    .platform-cards {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      justify-content: center;
+      margin-bottom: 28px;
+    }
+    .platform-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 32px;
+      min-width: 160px;
+      transition: border-color .2s;
+    }
+    .platform-card:hover { border-color: #3a4a64; }
+    .platform-icon { font-size: 2rem; }
+    .platform-name { font-size: .9rem; font-weight: 600; }
+    .platform-formats { font-size: .75rem; color: var(--muted); }
+
+    /* ── FOOTER ── */
+    footer {
+      text-align: center;
+      padding: 40px 24px;
+      font-size: .85rem;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+    }
+    footer a { color: var(--accent); }
+    footer a:hover { text-decoration: underline; }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 600px) {
+      .shots-grid { grid-template-columns: 1fr; }
+      .nav-links { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Navigation -->
+<nav>
+  <span class="nav-logo">Tday</span>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#screenshots">Screenshots</a>
+    <a href="#download">Download</a>
+  </div>
+  <a class="nav-gh" href="https://github.com/unbug/tday" target="_blank" rel="noopener">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+    GitHub
+  </a>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="hero-badge">
+    <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><circle cx="5" cy="5" r="5"/></svg>
+    Free &amp; Open Source
+  </div>
+  <h1>One Terminal for<br /><span>Every AI Agent</span></h1>
+  <p>
+    Claude Code, Codex CLI, GitHub Copilot CLI, Gemini CLI, OpenCode, Pi, and more —
+    all in one multi-tab workspace with Computer Use, cross-agent analytics, and native
+    CoWorker personas.
+  </p>
+  <div class="hero-cta">
+    <a id="download-btn" class="btn-primary" href="https://github.com/unbug/tday/releases" target="_blank" rel="noopener">
+      ⬇ Download for <span id="platform-name">your platform</span>
+    </a>
+    <a class="btn-secondary" href="https://github.com/unbug/tday" target="_blank" rel="noopener">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+      View on GitHub
+    </a>
+  </div>
+  <p class="platform-hint" id="platform-hint"></p>
+</section>
+
+<!-- Agent chips -->
+<div class="agents" aria-label="Supported AI agents">
+  <span class="agent-chip">Claude Code</span>
+  <span class="agent-chip">Codex CLI</span>
+  <span class="agent-chip">GitHub Copilot CLI</span>
+  <span class="agent-chip">Gemini CLI</span>
+  <span class="agent-chip">OpenCode</span>
+  <span class="agent-chip">Pi</span>
+  <span class="agent-chip">Qwen-Code</span>
+  <span class="agent-chip">Crush</span>
+  <span class="agent-chip">Hermes</span>
+</div>
+
+<!-- Demo video thumbnail -->
+<div class="demo-wrap">
+  <a href="https://x.com/i/status/2049935301808935356" target="_blank" rel="noopener" aria-label="Watch Tday demo video on X">
+    <img
+      width="1200"
+      height="800"
+      src="https://github.com/user-attachments/assets/ba6c8041-173f-44bb-90d6-cd72071260df"
+      alt="Tday demo — multi-tab AI agent terminal in action"
+      loading="eager"
+    />
+  </a>
+  <p class="demo-caption">▶ Watch the demo on <a href="https://x.com/i/status/2049935301808935356" target="_blank" rel="noopener">X (Twitter)</a></p>
+</div>
+
+<!-- Screenshots -->
+<section class="screenshots" id="screenshots">
+  <p class="section-label">Screenshots</p>
+  <h2 class="section-title">See it in action</h2>
+  <div class="shots-grid">
+    <img
+      src="https://github.com/user-attachments/assets/c196629b-5ee4-46dd-b1e3-d0ba86ab66b9"
+      alt="Tday multi-tab workspace with AI agents"
+      loading="lazy"
+      width="600"
+    />
+    <img
+      src="https://github.com/user-attachments/assets/27bf23af-a5f6-4457-8cc7-7f6085829733"
+      alt="Tday provider settings and model configuration"
+      loading="lazy"
+      width="600"
+    />
+    <img
+      src="https://github.com/user-attachments/assets/9dc6b149-80d4-4175-839a-3102960f2457"
+      alt="Tday Computer Use — AI agent controlling the desktop"
+      loading="lazy"
+      width="600"
+    />
+    <img
+      src="https://github.com/user-attachments/assets/4990e941-0b65-4d25-9d3e-b46e3dd1f67e"
+      alt="Tday CoWorker system prompts and personas"
+      loading="lazy"
+      width="600"
+    />
+    <img
+      src="https://github.com/user-attachments/assets/2512a05f-e373-469f-859c-16b745da82a4"
+      alt="Tday cross-agent token usage and cost analytics"
+      loading="lazy"
+      width="600"
+    />
+    <img
+      src="https://github.com/user-attachments/assets/01c3ef52-3080-4d73-811d-0cb7759d275d"
+      alt="Tday agent session history and restore"
+      loading="lazy"
+      width="600"
+    />
+  </div>
+</section>
+
+<!-- Full-width screenshot -->
+<div class="fullshot">
+  <img
+    src="https://github.com/user-attachments/assets/7bd8c4fd-5026-4e41-80ba-ed3dbe481e96"
+    alt="Tday full application overview"
+    loading="lazy"
+    width="1312"
+    height="912"
+  />
+</div>
+
+<!-- Features -->
+<section class="features" id="features">
+  <p class="section-label">Features</p>
+  <h2 class="section-title">Everything you need to run AI agents</h2>
+  <div class="features-grid">
+    <div class="feat">
+      <div class="feat-icon">🖥️</div>
+      <h3>Computer Use</h3>
+      <p>Give any agent hands on your desktop using native Accessibility APIs — no vision model required. Click, type, scroll, open apps, and control Chrome via CDP.</p>
+    </div>
+    <div class="feat">
+      <div class="feat-icon">🗂️</div>
+      <h3>Multi-Tab Workspace</h3>
+      <p>Open unlimited agent tabs simultaneously, drag to reorder, and set per-tab working directories. Tabs and sessions are fully restored on restart.</p>
+    </div>
+    <div class="feat">
+      <div class="feat-icon">📊</div>
+      <h3>Cross-Agent Analytics</h3>
+      <p>Track token usage and estimated costs across every agent and session. Daily chart, model breakdown, and agent breakdown — all stored locally.</p>
+    </div>
+    <div class="feat">
+      <div class="feat-icon">🤖</div>
+      <h3>9 AI Agent Adapters</h3>
+      <p>First-class support for Claude Code, Codex CLI, GitHub Copilot CLI, Gemini CLI, OpenCode, Pi, Qwen-Code, Crush, and Hermes — each with auto-detect and install.</p>
+    </div>
+    <div class="feat">
+      <div class="feat-icon">🧩</div>
+      <h3>CoWorker Personas</h3>
+      <p>Inject specialist role system prompts into any agent tab instantly. Built-in roles, online presets (Karpathy, Devin-style, Analyst), or your own custom text.</p>
+    </div>
+    <div class="feat">
+      <div class="feat-icon">⚙️</div>
+      <h3>28-Provider Settings</h3>
+      <p>Configure DeepSeek, OpenAI, Anthropic, Gemini, xAI, Groq, Ollama, LM Studio, OpenRouter, and 18 more — with local inference auto-discovery.</p>
+    </div>
+    <div class="feat">
+      <div class="feat-icon">📜</div>
+      <h3>Unified History</h3>
+      <p>Every conversation across all agents is captured and indexed. Search by content or agent, and restore any past session including its working directory.</p>
+    </div>
+    <div class="feat">
+      <div class="feat-icon">⏰</div>
+      <h3>Cron Scheduler</h3>
+      <p>Schedule automated agent tasks with Interval, At Time, or Custom cron modes. Human-readable preview and run-count dashboard included.</p>
+    </div>
+    <div class="feat">
+      <div class="feat-icon">🌐</div>
+      <h3>Cross-Platform</h3>
+      <p>Runs natively on macOS (arm64 + x64), Windows x64, and Linux x64. Full PTY terminal with xterm.js, correct resize handling, and native menus.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Download section -->
+<section class="platforms" id="download">
+  <h2>Download Tday</h2>
+  <p>Free and open source — pick your platform below</p>
+  <div class="platform-cards">
+    <div class="platform-card">
+      <span class="platform-icon"></span>
+      <span class="platform-name">macOS</span>
+      <span class="platform-formats">arm64 · x64 · .dmg</span>
+    </div>
+    <div class="platform-card">
+      <span class="platform-icon">🪟</span>
+      <span class="platform-name">Windows</span>
+      <span class="platform-formats">x64 · .exe · .zip</span>
+    </div>
+    <div class="platform-card">
+      <span class="platform-icon">🐧</span>
+      <span class="platform-name">Linux</span>
+      <span class="platform-formats">x64 · .AppImage · .tar.gz</span>
+    </div>
+  </div>
+  <a class="btn-primary" href="https://github.com/unbug/tday/releases" target="_blank" rel="noopener">
+    ⬇ View All Releases on GitHub
+  </a>
+</section>
+
+<!-- Footer -->
+<footer>
+  <p>
+    <a href="https://github.com/unbug/tday" target="_blank" rel="noopener">Tday</a>
+    is open source under the MIT license ·
+    <a href="https://github.com/unbug/tday/releases" target="_blank" rel="noopener">Releases</a>
+    ·
+    <a href="https://github.com/unbug/tday/issues" target="_blank" rel="noopener">Issues</a>
+    ·
+    <a href="https://x.com/unbug" target="_blank" rel="noopener">@unbug on X</a>
+  </p>
+</footer>
+
+<script>
+  (function () {
+    var ua = navigator.userAgent || '';
+    var platform = navigator.platform || '';
+    var btn = document.getElementById('download-btn');
+    var nameEl = document.getElementById('platform-name');
+    var hint = document.getElementById('platform-hint');
+    var releases = 'https://github.com/unbug/tday/releases';
+
+    var isMac = /Mac/.test(platform) || /Macintosh/.test(ua);
+    var isWin = /Win/.test(platform) || /Windows/.test(ua);
+    var isLinux = /Linux/.test(platform) && !isMac;
+
+    if (isMac) {
+      var isArm = /arm64|aarch64/i.test(ua) || (typeof navigator.userAgentData !== 'undefined');
+      nameEl.textContent = isArm ? 'macOS (Apple Silicon)' : 'macOS';
+      hint.textContent = 'Downloads a .dmg installer · macOS arm64 + x64 available';
+    } else if (isWin) {
+      nameEl.textContent = 'Windows';
+      hint.textContent = 'Downloads a .exe installer or .zip archive · Windows x64';
+    } else if (isLinux) {
+      nameEl.textContent = 'Linux';
+      hint.textContent = 'Downloads an .AppImage or .tar.gz · Linux x64';
+    } else {
+      nameEl.textContent = 'your platform';
+      hint.textContent = 'macOS · Windows · Linux';
+    }
+
+    btn.href = releases;
+  })();
+</script>
+
+</body>
+</html>
