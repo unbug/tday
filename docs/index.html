@@ -346,12 +346,20 @@
       margin: 0 auto 100px;
       padding: 0 24px;
     }
+    .fullshot a {
+      display: block;
+      border-radius: 14px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      box-shadow: 0 32px 96px rgba(0,0,0,.6);
+      transition: transform .25s;
+    }
+    .fullshot a:hover { transform: translateY(-4px); }
     .fullshot img {
       width: 100%;
       height: auto;
       border-radius: 14px;
-      border: 1px solid var(--border);
-      box-shadow: 0 32px 96px rgba(0,0,0,.6);
+      display: block;
     }
 
     /* ── PLATFORMS ── */
@@ -441,9 +449,9 @@
     <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><circle cx="5" cy="5" r="5"/></svg>
     Free &amp; Open Source
   </div>
-  <h1>Use Any Model with<br /><span>Every AI Agent</span></h1>
+  <h1>All-in-One<br /><span>Harness Agent Terminal</span></h1>
   <p>
-    Let Claude Code, Codex, Copilot CLI, and others run on <strong style="color:var(--text)">DeepSeek, Ollama, OpenAI</strong>, or any provider —
+    Use Any Model with Every AI Agent — let Claude Code, Codex, Copilot CLI, and others run on <strong style="color:var(--text)">DeepSeek, Ollama, OpenAI</strong>, or any provider —
     all in one multi-tab terminal with unified model config, Computer Use, and cross-agent analytics.
   </p>
   <div class="hero-cta">
@@ -532,13 +540,16 @@
 
 <!-- Full-width screenshot -->
 <div class="fullshot">
-  <img
-    src="https://github.com/user-attachments/assets/7bd8c4fd-5026-4e41-80ba-ed3dbe481e96"
-    alt="Tday full application overview"
-    loading="lazy"
-    width="1312"
-    height="912"
-  />
+  <a href="https://x.com/unbug/status/2053469554396025203?s=46&amp;t=eTNYDm1gQQbV--Rjdf18OQ" target="_blank" rel="noopener" aria-label="Watch Tday Computer Use demo on X">
+    <img
+      src="https://github.com/user-attachments/assets/7bd8c4fd-5026-4e41-80ba-ed3dbe481e96"
+      alt="Tday full application overview"
+      loading="lazy"
+      width="1312"
+      height="912"
+    />
+  </a>
+  <p class="demo-caption"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle;margin-right:4px"><polygon points="5 3 19 12 5 21 5 3"/></svg> Watch the Computer Use demo on <a href="https://x.com/unbug/status/2053469554396025203?s=46&amp;t=eTNYDm1gQQbV--Rjdf18OQ" target="_blank" rel="noopener">X (Twitter)</a></p>
 </div>
 
 <!-- Features -->
