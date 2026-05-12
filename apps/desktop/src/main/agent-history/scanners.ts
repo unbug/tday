@@ -22,7 +22,7 @@
  * session histories into memory.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -30,6 +30,26 @@ import type { AgentHistoryEntry } from '@tday/shared';
 
 /** Maximum lines scanned per file to extract the title. */
 const MAX_TITLE_SCAN_LINES = 150;
+
+/** Read at most MAX_TITLE_SCAN_LINES lines from a file without loading it fully.
+ *  Reads up to 64 KB synchronously — sufficient for 150 JSONL lines in practice.
+ */
+function readFirstLines(filePath: string): string[] {
+  const CHUNK_BYTES = 65536; // 64 KB
+  let fd: number | null = null;
+  try {
+    fd = openSync(filePath, 'r');
+    const buf = Buffer.alloc(CHUNK_BYTES);
+    const bytesRead = readSync(fd, buf, 0, CHUNK_BYTES, 0);
+    const text = buf.slice(0, bytesRead).toString('utf8');
+    const lines = text.split('\n');
+    return lines.length > MAX_TITLE_SCAN_LINES ? lines.slice(0, MAX_TITLE_SCAN_LINES) : lines;
+  } catch {
+    return [];
+  } finally {
+    if (fd !== null) { try { closeSync(fd); } catch { /* ignore */ } }
+  }
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -121,10 +141,9 @@ export function scanClaudeHistory(): AgentHistoryEntry[] {
       let messageCount = 0;
 
       try {
-        const content = readFileSync(filePath, 'utf8');
         let lineIdx = 0;
-        for (const line of content.split('\n')) {
-          if (lineIdx++ > MAX_TITLE_SCAN_LINES) break;
+        for (const line of readFirstLines(filePath)) {
+          lineIdx++;
           const trimmed = line.trim();
           if (!trimmed) continue;
           try {
@@ -204,10 +223,9 @@ export function scanCodexHistory(): AgentHistoryEntry[] {
     let messageCount = 0;
 
     try {
-      const content = readFileSync(filePath, 'utf8');
       let lineIdx = 0;
-      for (const line of content.split('\n')) {
-        if (lineIdx++ > MAX_TITLE_SCAN_LINES) break;
+      for (const line of readFirstLines(filePath)) {
+        lineIdx++;
         const trimmed = line.trim();
         if (!trimmed) continue;
         try {
@@ -381,10 +399,9 @@ export function scanGeminiHistory(): AgentHistoryEntry[] {
       let messageCount = 0;
 
       try {
-        const content = readFileSync(filePath, 'utf8');
         let lineIdx = 0;
-        for (const line of content.split('\n')) {
-          if (lineIdx++ > MAX_TITLE_SCAN_LINES) break;
+        for (const line of readFirstLines(filePath)) {
+          lineIdx++;
           const trimmed = line.trim();
           if (!trimmed) continue;
           try {
@@ -492,10 +509,9 @@ export function scanPiHistory(): AgentHistoryEntry[] {
       let cwd = '';
 
       try {
-        const content = readFileSync(filePath, 'utf8');
         let lineIdx = 0;
-        for (const line of content.split('\n')) {
-          if (lineIdx++ > MAX_TITLE_SCAN_LINES) break;
+        for (const line of readFirstLines(filePath)) {
+          lineIdx++;
           const trimmed = line.trim();
           if (!trimmed) continue;
           try {

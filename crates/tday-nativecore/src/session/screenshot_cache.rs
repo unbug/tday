@@ -4,7 +4,7 @@
 
 /// LRU screenshot cache for find_image and coordinate re-use.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 const MAX_ENTRIES: usize = 10;
 
@@ -29,6 +29,7 @@ pub struct CachedScreenshot {
 #[derive(Default)]
 pub struct ScreenshotCache {
     entries: VecDeque<CachedScreenshot>,
+    index:   HashMap<String, usize>, // id → position in entries
     counter: u64,
 }
 
@@ -38,14 +39,20 @@ impl ScreenshotCache {
         self.counter += 1;
         let id = format!("ss_{}", self.counter);
         if self.entries.len() >= MAX_ENTRIES {
-            self.entries.pop_front();
+            if let Some(front) = self.entries.pop_front() {
+                self.index.remove(&front.id);
+                // Shift all indices down by 1
+                for v in self.index.values_mut() { *v -= 1; }
+            }
         }
+        self.index.insert(id.clone(), self.entries.len());
         self.entries.push_back(CachedScreenshot { id: id.clone(), png_data, metadata: meta });
         id
     }
 
     /// Peek (no LRU bump) — used by find_image which clones the data immediately.
     pub fn peek(&self, id: &str) -> Option<&CachedScreenshot> {
-        self.entries.iter().find(|e| e.id == id)
+        let pos = self.index.get(id)?;
+        self.entries.get(*pos)
     }
 }

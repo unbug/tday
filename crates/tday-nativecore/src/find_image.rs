@@ -10,6 +10,7 @@
 
 use image::{GrayImage, ImageReader};
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::io::Cursor;
 
 #[cfg(feature = "find_image_parallel")]
@@ -85,10 +86,10 @@ pub fn find_image(
         None    => (0, 0, ss_w, ss_h),
     };
 
-    let search_view = if sr_x == 0 && sr_y == 0 && sr_w == ss_w && sr_h == ss_h {
-        screenshot.clone()
+    let search_view: Cow<GrayImage> = if sr_x == 0 && sr_y == 0 && sr_w == ss_w && sr_h == ss_h {
+        Cow::Borrowed(&screenshot)
     } else {
-        image::imageops::crop_imm(&screenshot, sr_x, sr_y, sr_w, sr_h).to_image()
+        Cow::Owned(image::imageops::crop_imm(&screenshot, sr_x, sr_y, sr_w, sr_h).to_image())
     };
 
     // Build scale list
@@ -134,8 +135,8 @@ pub fn find_image(
             if new_w == 0 || new_h == 0 { continue; }
             if new_w > sr_w || new_h > sr_h { continue; }
 
-            let scaled_t = image::imageops::resize(ref_t, new_w, new_h, image::imageops::FilterType::Lanczos3);
-            let scaled_m = ref_m.as_ref().map(|m| image::imageops::resize(m, new_w, new_h, image::imageops::FilterType::Lanczos3));
+            let scaled_t = image::imageops::resize(ref_t, new_w, new_h, image::imageops::FilterType::Triangle);
+            let scaled_m = ref_m.as_ref().map(|m| image::imageops::resize(m, new_w, new_h, image::imageops::FilterType::Triangle));
 
             // Scan with stride
             let match_w = sr_w - new_w;
@@ -192,14 +193,28 @@ struct TemplateVals { mean: f64, norm: f64 }
 
 fn precompute_template(t: &GrayImage, mask: Option<&GrayImage>) -> TemplateVals {
     let (tw, th) = t.dimensions();
-    let pixels: Vec<f64> = (0..th).flat_map(|y| (0..tw).map(move |x| (y, x)))
-        .filter(|&(y, x)| mask.map_or(true, |m| m.get_pixel(x, y).0[0] > 127u8))
-        .map(|(y, x)| t.get_pixel(x, y).0[0] as f64)
-        .collect();
 
-    if pixels.is_empty() { return TemplateVals { mean: 0.0, norm: 1.0 }; }
-    let mean = pixels.iter().sum::<f64>() / pixels.len() as f64;
-    let norm = pixels.iter().map(|&v| (v - mean).powi(2)).sum::<f64>().sqrt();
+    // First pass: compute mean
+    let mut sum = 0.0f64;
+    let mut count = 0usize;
+    for y in 0..th { for x in 0..tw {
+        if mask.map_or(true, |m| m.get_pixel(x, y).0[0] > 127u8) {
+            sum += t.get_pixel(x, y).0[0] as f64;
+            count += 1;
+        }
+    }}
+    if count == 0 { return TemplateVals { mean: 0.0, norm: 1.0 }; }
+    let mean = sum / count as f64;
+
+    // Second pass: compute norm
+    let mut norm_sq = 0.0f64;
+    for y in 0..th { for x in 0..tw {
+        if mask.map_or(true, |m| m.get_pixel(x, y).0[0] > 127u8) {
+            let v = t.get_pixel(x, y).0[0] as f64 - mean;
+            norm_sq += v * v;
+        }
+    }}
+    let norm = norm_sq.sqrt();
     TemplateVals { mean, norm: if norm < 1e-9 { 1.0 } else { norm } }
 }
 

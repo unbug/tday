@@ -75,7 +75,7 @@ export function loadStore(): HistoryStore {
 export function saveStore(store: HistoryStore): void {
   try {
     if (!existsSync(TDAY_DIR)) mkdirSync(TDAY_DIR, { recursive: true });
-    writeFileSync(INDEX_TMP, JSON.stringify(store, null, 2), 'utf8');
+    writeFileSync(INDEX_TMP, JSON.stringify(store), 'utf8');
     renameSync(INDEX_TMP, INDEX_FILE);
     hotCache = store;
   } catch {

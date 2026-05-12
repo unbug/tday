@@ -58,6 +58,16 @@ export function sessionKeyFromRequest(req: IncomingMessage): string {
   return '';
 }
 
+const MAX_CONVERSATION_ENTRIES = 500;
+
+/** Evict the oldest entry if the Map exceeds the given limit. */
+function evictOldest<V>(map: Map<string, V>, limit: number): void {
+  if (map.size > limit) {
+    const oldest = map.keys().next().value;
+    if (oldest !== undefined) map.delete(oldest);
+  }
+}
+
 // ─── Adapter ─────────────────────────────────────────────────────────────────
 
 export class CodexDeepSeekAnthropicAdapter implements GatewayAdapter {
@@ -130,7 +140,11 @@ export class CodexDeepSeekAnthropicAdapter implements GatewayAdapter {
     const key = sessionKeyFromRequest(req);
     if (!key) return new ThinkingState();
     let s = this.thinkingStates.get(key);
-    if (!s) { s = new ThinkingState(); this.thinkingStates.set(key, s); }
+    if (!s) {
+      s = new ThinkingState();
+      this.thinkingStates.set(key, s);
+      evictOldest(this.thinkingStates, MAX_CONVERSATION_ENTRIES);
+    }
     return s;
   }
 
@@ -211,6 +225,7 @@ export class CodexDeepSeekAnthropicAdapter implements GatewayAdapter {
       const json = await upstream.json() as AResponse;
       const { output, outputText } = convertAnthropicResponse(json, thinkingState, responseId);
       this.conversations.set(responseId, [...allMessages, ...buildStoredMessages(json.content)]);
+      evictOldest(this.conversations, MAX_CONVERSATION_ENTRIES);
       appendUsage({
         ts: Date.now(),
         agentId,
@@ -315,6 +330,7 @@ export class CodexDeepSeekAnthropicAdapter implements GatewayAdapter {
       responseId,
       [...allMessages, ...buildStoredMessagesFromStream(output, completedReasoningText)],
     );
+    evictOldest(this.conversations, MAX_CONVERSATION_ENTRIES);
     appendUsage({
       ts: Date.now(),
       agentId,
