@@ -255,11 +255,17 @@ unsafe fn snapshot_element(
     if depth < MAX_DEPTH && depth < max_depth && (*counter as usize) < MAX_ELEMENTS {
         if let Some(kids) = ax_children(el) {
             for i in 0..kids.len() {
-                let child = *kids.get_unchecked(i) as AXUIElementRef;
-                if !child.is_null() {
-                    core_foundation::base::CFRetain(child as _);
-                    let node = snapshot_element(child, refs, counter, generation, depth + 1, max_depth);
-                    core_foundation::base::CFRelease(child as _);
+                // Use safe indexing: the macOS AX API occasionally returns a CFArray
+                // whose reported length is inconsistent with its actual buffer.
+                // get_unchecked would be UB in that case; .get() returns None safely.
+                let child_ptr = match kids.get(i) {
+                    Some(ptr) => *ptr as AXUIElementRef,
+                    None => continue,
+                };
+                if !child_ptr.is_null() {
+                    core_foundation::base::CFRetain(child_ptr as _);
+                    let node = snapshot_element(child_ptr, refs, counter, generation, depth + 1, max_depth);
+                    core_foundation::base::CFRelease(child_ptr as _);
                     children.push(node);
                 }
             }

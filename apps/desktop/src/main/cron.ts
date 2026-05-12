@@ -223,12 +223,22 @@ export class CronScheduler {
     const delay = nextDate.getTime() - Date.now();
     updateJobStats(job.id, { nextRunAt: nextDate.getTime() });
 
+    // setTimeout delay is stored as a 32-bit signed integer, so values above
+    // 2^31 - 1 ms (~24.8 days) wrap to negative and fire immediately.
+    // When the next run is further away, cap the delay and reschedule at
+    // expiry without firing, so we converge on the true fire time.
+    const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+    const clampedDelay = Math.min(Math.max(0, delay), MAX_TIMEOUT_MS);
+    const willFireNow = delay <= MAX_TIMEOUT_MS;
+
     const timer = setTimeout(() => {
       this.timers.delete(job.id);
-      this.fireFn(job);
-      // Immediately reschedule for the next occurrence.
+      if (willFireNow && Date.now() >= nextDate.getTime()) {
+        this.fireFn(job);
+      }
+      // Immediately reschedule for the next (or same, if clamped) occurrence.
       this.scheduleOne(job);
-    }, Math.max(0, delay));
+    }, clampedDelay);
 
     this.timers.set(job.id, timer);
   }

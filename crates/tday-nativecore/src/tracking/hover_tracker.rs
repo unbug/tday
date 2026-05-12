@@ -79,7 +79,7 @@ impl HoverTracker {
     }
 
     pub fn drain_events(&self) -> Vec<HoverEvent> {
-        let mut events = self.events.lock().unwrap();
+        let mut events = self.events.lock().unwrap_or_else(|e| e.into_inner());
         events.drain(..).collect()
     }
 
@@ -92,7 +92,7 @@ impl HoverTracker {
         {
             task_handle.abort();
         }
-        let mut buf = events.lock().unwrap();
+        let mut buf = events.lock().unwrap_or_else(|e| e.into_inner());
         buf.drain(..).collect()
     }
 }
@@ -179,7 +179,7 @@ pub fn start_polling(
             if start.elapsed() >= max_duration {
                 if let Some(entry) = confirmed {
                     let left_at = first_departure.unwrap_or_else(Instant::now);
-                    events.lock().unwrap().push(entry.into_event(left_at, true));
+                    events.lock().unwrap_or_else(|e| e.into_inner()).push(entry.into_event(left_at, true));
                 }
                 return;
             }
@@ -221,7 +221,7 @@ pub fn start_polling(
                 if cand.since.elapsed() >= min_dwell {
                     if let Some(prev) = confirmed.take() {
                         let departed = first_departure.unwrap_or(cand.since);
-                        events.lock().unwrap().push(prev.into_event(departed, false));
+                        events.lock().unwrap_or_else(|e| e.into_inner()).push(prev.into_event(departed, false));
                     }
                     confirmed = candidate.take();
                     first_departure = None;

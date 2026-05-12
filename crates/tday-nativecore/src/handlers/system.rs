@@ -58,8 +58,27 @@ pub async fn handle_scrape(params: Value) -> Result<Value> {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_string();
-    let body = resp.text().await
+
+    // Reject responses that are too large to prevent OOM / DoS.
+    const MAX_BODY_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
+    if let Some(len) = resp.content_length() {
+        if len > MAX_BODY_BYTES {
+            return Err(DevToolsError::Input(format!(
+                "response body too large ({len} bytes > {MAX_BODY_BYTES} byte limit)"
+            )));
+        }
+    }
+    // Read with a byte cap: take at most MAX_BODY_BYTES bytes then return an
+    // error if there are more, so infinite/chunked streams are also capped.
+    let bytes = resp.bytes().await
         .map_err(|e| DevToolsError::Other(format!("reading body: {e}")))?;
+    if bytes.len() as u64 > MAX_BODY_BYTES {
+        return Err(DevToolsError::Input(format!(
+            "response body too large ({} bytes > {MAX_BODY_BYTES} byte limit)",
+            bytes.len(),
+        )));
+    }
+    let body = String::from_utf8_lossy(&bytes).into_owned();
 
     Ok(json!({
         "status":       status,
@@ -347,32 +366,70 @@ pub async fn handle_process(params: Value) -> Result<Value> {
             let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
 
             let output = tokio::task::spawn_blocking(|| {
-                std::process::Command::new("ps")
-                    .args(["-axo", "pid,pcpu,pmem,comm"])
-                    .output()
+                #[cfg(windows)]
+                {
+                    // `ps` is not available on Windows; use `tasklist` instead.
+                    std::process::Command::new("tasklist")
+                        .args(["/FO", "CSV", "/NH"])
+                        .output()
+                }
+                #[cfg(not(windows))]
+                {
+                    std::process::Command::new("ps")
+                        .args(["-axo", "pid,pcpu,pmem,comm"])
+                        .output()
+                }
             })
             .await.map_err(|e| DevToolsError::Other(format!("spawn: {e}")))?
             .map_err(|e| DevToolsError::Other(format!("ps: {e}")))?;
 
             let stdout = String::from_utf8_lossy(&output.stdout);
-            let mut procs: Vec<Value> = stdout.lines()
-                .skip(1)  // skip header
-                .filter_map(|line| {
-                    let parts: Vec<&str> = line.split_whitespace().collect();
-                    if parts.len() < 4 { return None; }
-                    let pid:  i64 = parts[0].parse().ok()?;
-                    let cpu:  f64 = parts[1].parse().ok()?;
-                    let mem:  f64 = parts[2].parse().ok()?;
-                    // `comm` may be just the executable name; join remaining parts
-                    let name = parts[3..].join(" ");
-                    Some(json!({ "pid": pid, "cpu_percent": cpu, "mem_percent": mem, "name": name }))
+            let mut procs: Vec<Value> = {
+                #[cfg(windows)]
+                {
+                    // `tasklist /FO CSV /NH` format:
+                    // "image.exe","pid","session","#","mem_kb K"
+                    stdout.lines()
+                        .filter_map(|line| {
+                            // Strip surrounding quotes and split on `","`
+                            let line = line.trim().trim_matches('"');
+                            let parts: Vec<&str> = line.split("\",\"").collect();
+                            if parts.len() < 5 { return None; }
+                            let name = parts[0].to_string();
+                            let pid: i64 = parts[1].parse().ok()?;
+                            // mem is like "1,234 K" — strip non-digits
+                            let mem_kb: f64 = parts[4].chars()
+                                .filter(|c| c.is_ascii_digit())
+                                .collect::<String>()
+                                .parse::<f64>().ok()?;
+                            Some(json!({ "pid": pid, "cpu_percent": 0.0, "mem_percent": mem_kb / 1024.0, "name": name }))
+                        })
+                        .collect()
+                }
+                #[cfg(not(windows))]
+                {
+                    stdout.lines()
+                        .skip(1)  // skip header
+                        .filter_map(|line| {
+                            let parts: Vec<&str> = line.split_whitespace().collect();
+                            if parts.len() < 4 { return None; }
+                            let pid:  i64 = parts[0].parse().ok()?;
+                            let cpu:  f64 = parts[1].parse().ok()?;
+                            let mem:  f64 = parts[2].parse().ok()?;
+                            // `comm` may be just the executable name; join remaining parts
+                            let name = parts[3..].join(" ");
+                            Some(json!({ "pid": pid, "cpu_percent": cpu, "mem_percent": mem, "name": name }))
+                        })
+                        .collect()
+                }
+            };
+
+            // Apply name filter
+            procs.retain(|p| {
+                name_filter.as_ref().map_or(true, |f| {
+                    p["name"].as_str().map_or(false, |n| n.to_lowercase().contains(f.as_str()))
                 })
-                .filter(|p| {
-                    name_filter.as_ref().map_or(true, |f| {
-                        p["name"].as_str().map_or(false, |n| n.to_lowercase().contains(f.as_str()))
-                    })
-                })
-                .collect();
+            });
 
             // Sort
             match sort_by.as_str() {
@@ -397,12 +454,16 @@ pub async fn handle_process(params: Value) -> Result<Value> {
 
             let output = tokio::task::spawn_blocking(move || {
                 if let Some(p) = pid {
+                    // `kill -s SIGNAL PID` is POSIX and correctly delivers the named signal.
                     std::process::Command::new("kill")
                         .args(["-s", signal, &p.to_string()])
                         .output()
                 } else {
+                    // `pkill -s` is a session-ID filter on Linux/macOS, NOT a signal selector.
+                    // Use `-SIGNAL` (e.g. `-KILL`, `-TERM`) to specify the signal to pkill.
+                    let sig_flag = format!("-{signal}");
                     std::process::Command::new("pkill")
-                        .args(["-s", signal, name.as_deref().unwrap_or("")])
+                        .args([sig_flag.as_str(), name.as_deref().unwrap_or("")])
                         .output()
                 }
             })
@@ -440,7 +501,15 @@ pub async fn handle_filesystem(params: Value) -> Result<Value> {
 
     // Resolve ~ in path
     let path = if path_raw.starts_with("~/") {
-        let home = std::env::var("HOME").unwrap_or_default();
+        let home = std::env::var("HOME")
+            .map_err(|_| DevToolsError::Input(
+                "HOME environment variable is not set; cannot expand '~/' path".into()
+            ))?;
+        if home.is_empty() {
+            return Err(DevToolsError::Input(
+                "HOME environment variable is empty; cannot expand '~/' path".into()
+            ));
+        }
         format!("{}{}", home, &path_raw[1..])
     } else {
         path_raw
@@ -525,11 +594,17 @@ pub async fn handle_filesystem(params: Value) -> Result<Value> {
         "copy" => {
             let dest = params.get("destination").and_then(|v| v.as_str())
                 .ok_or_else(|| DevToolsError::Input("destination required for copy mode".into()))?.to_string();
-            tokio::task::spawn_blocking(move || {
+            let status = tokio::task::spawn_blocking(move || {
                 std::process::Command::new("cp").args(["-R", &path, &dest]).status()
             })
             .await.map_err(|e| DevToolsError::Other(format!("spawn: {e}")))?
             .map_err(|e| DevToolsError::Other(format!("cp: {e}")))?;
+            if !status.success() {
+                return Err(DevToolsError::Other(format!(
+                    "cp failed with exit code {}",
+                    status.code().unwrap_or(-1),
+                )));
+            }
             Ok(json!({ "ok": true }))
         }
         "move" => {
@@ -562,9 +637,28 @@ pub async fn handle_filesystem(params: Value) -> Result<Value> {
         "search" => {
             let pattern = params.get("pattern").and_then(|v| v.as_str())
                 .ok_or_else(|| DevToolsError::Input("pattern required for search mode".into()))?.to_string();
+
+            // Validate the pattern: only allow characters safe for a filename glob.
+            // Reject path separators and null bytes to prevent injection or traversal.
+            if pattern.contains('/') || pattern.contains('\\') || pattern.contains('\0') {
+                return Err(DevToolsError::Input(
+                    "search pattern must not contain path separators or null bytes".into(),
+                ));
+            }
+
+            // Canonicalize the search root to prevent path traversal (e.g. ../../etc).
+            // We use std::fs::canonicalize which resolves symlinks and `..` components.
+            let canonical_path = tokio::task::spawn_blocking({
+                let p = path.clone();
+                move || std::fs::canonicalize(&p)
+            })
+            .await.map_err(|e| DevToolsError::Other(format!("spawn: {e}")))?
+            .map_err(|e| DevToolsError::Other(format!("canonicalize '{path}': {e}")))?;
+
+            let search_root = canonical_path.to_string_lossy().into_owned();
             let output = tokio::task::spawn_blocking(move || {
                 std::process::Command::new("find")
-                    .args([&path, "-name", &pattern])
+                    .args([&search_root, "-name", &pattern])
                     .output()
             })
             .await.map_err(|e| DevToolsError::Other(format!("spawn: {e}")))?

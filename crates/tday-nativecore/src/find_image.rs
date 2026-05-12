@@ -81,7 +81,17 @@ pub fn find_image(
     // Clamp search area
     let (ss_w, ss_h) = screenshot.dimensions();
     let (sr_x, sr_y, sr_w, sr_h) = match search_region {
-        Some(r) => (r.x, r.y, r.w.min(ss_w - r.x), r.h.min(ss_h - r.y)),
+        Some(r) => {
+            // Guard against u32 underflow: if the region origin is outside the
+            // screenshot, reject immediately rather than wrapping around.
+            if r.x >= ss_w || r.y >= ss_h {
+                return Err(format!(
+                    "search_region origin ({},{}) is outside screenshot ({ss_w}×{ss_h})",
+                    r.x, r.y,
+                ));
+            }
+            (r.x, r.y, r.w.min(ss_w - r.x), r.h.min(ss_h - r.y))
+        }
         None    => (0, 0, ss_w, ss_h),
     };
 
@@ -232,7 +242,10 @@ fn ncc_at(
         }
     }}
     let denom = norm_s.sqrt() * tv.norm;
-    if denom < 1e-9 { 0.0 } else { (num / denom).clamp(-1.0, 1.0) }
+    // Guard against NaN: denom is zero when the source window or template has
+    // zero variance (solid-color region).  Return 0.0 rather than NaN so that
+    // the score never falsely exceeds the threshold.
+    if denom == 0.0 || !denom.is_finite() { 0.0 } else { (num / denom).clamp(-1.0, 1.0) }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

@@ -359,7 +359,10 @@ export function convertInput(
 
     // user (or anything else with content)
     {
-      const r = role || 'user';
+      // Only 'user' and 'assistant' are valid Anthropic message roles.
+      // Anything else (e.g. 'system', 'tool', unknown strings) defaults to 'user'
+      // to prevent a 400 error from the Anthropic API.
+      const r: 'user' | 'assistant' = role === 'assistant' ? 'assistant' : 'user';
       const blocks = contentBlocksFromContent(item.content);
       if (blocks.length === 0) { pendingSummary = undefined; continue; }
       messages.push({ role: r, content: blocks });

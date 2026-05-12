@@ -381,6 +381,7 @@ export function buildOpencodeMcpEntry(): OpencodeMcpEntry {
 export interface McpEntryUrl {
   url: string;
   type: 'http';
+  headers?: Record<string, string>;
 }
 
 /**
@@ -390,6 +391,7 @@ export interface McpEntryUrl {
  */
 export interface GeminiMcpEntryUrl {
   url: string;
+  headers?: Record<string, string>;
 }
 
 /** opencode format for a remote MCP server. */
@@ -397,6 +399,7 @@ export interface OpencodeMcpEntryUrl {
   type: 'remote';
   url: string;
   enabled: boolean;
+  headers?: Record<string, string>;
 }
 
 /**
@@ -404,7 +407,10 @@ export interface OpencodeMcpEntryUrl {
  * Uses `type: 'http'` per the MCP spec — claude-code requires this exact key.
  * Do NOT use this for Gemini; Gemini requires a different format (url only).
  */
-export function buildMcpEntryUrl(url: string): McpEntryUrl {
+export function buildMcpEntryUrl(url: string, authToken?: string | null): McpEntryUrl {
+  if (authToken) {
+    return { type: 'http', url, headers: { Authorization: `Bearer ${authToken}` } };
+  }
   return { type: 'http', url };
 }
 
@@ -412,21 +418,31 @@ export function buildMcpEntryUrl(url: string): McpEntryUrl {
  * Returns a URL-based MCP entry for Gemini CLI settings.
  * Gemini only accepts `{ url }` — any extra key causes a validation error.
  */
-export function buildGeminiMcpEntryUrl(url: string): GeminiMcpEntryUrl {
+export function buildGeminiMcpEntryUrl(url: string, authToken?: string | null): GeminiMcpEntryUrl {
+  if (authToken) {
+    return { url, headers: { Authorization: `Bearer ${authToken}` } };
+  }
   return { url };
 }
 
 /** Returns a URL-based MCP entry for opencode (remote server). */
-export function buildOpencodeMcpEntryUrl(url: string): OpencodeMcpEntryUrl {
+export function buildOpencodeMcpEntryUrl(url: string, authToken?: string | null): OpencodeMcpEntryUrl {
+  if (authToken) {
+    return { type: 'remote', url, enabled: true, headers: { Authorization: `Bearer ${authToken}` } };
+  }
   return { type: 'remote', url, enabled: true };
 }
 
 /**
  * Returns the codex `-c` args to configure a remote MCP server by URL.
- * Example: `-c mcp_servers.tday-computer-use.url=http://127.0.0.1:PORT/mcp`
+ * Includes an Authorization header if an auth token is provided.
  */
-export function codexMcpCliArgsUrl(url: string): string[] {
-  return ['-c', `mcp_servers.${MCP_SERVER_KEY}.url=${url}`];
+export function codexMcpCliArgsUrl(url: string, authToken?: string | null): string[] {
+  const args = ['-c', `mcp_servers.${MCP_SERVER_KEY}.url=${url}`];
+  if (authToken) {
+    args.push('-c', `mcp_servers.${MCP_SERVER_KEY}.headers.Authorization=Bearer ${authToken}`);
+  }
+  return args;
 }
 
 // ── claude-code injection (per-session, no cleanup needed) ───────────────────
@@ -486,9 +502,10 @@ export function applyClaudeCodeMcpUrl(
   sessionSettings: Record<string, unknown>,
   url: string,
   isAnthropicBackend = true,
+  authToken?: string | null,
 ): void {
   const existing = (sessionSettings.mcpServers as Record<string, unknown>) ?? {};
-  sessionSettings.mcpServers = { ...existing, [MCP_SERVER_KEY]: buildMcpEntryUrl(url) };
+  sessionSettings.mcpServers = { ...existing, [MCP_SERVER_KEY]: buildMcpEntryUrl(url, authToken) };
 
   // Inject skill as custom instructions.
   const existingInstructions = typeof sessionSettings.customInstructions === 'string'
@@ -648,11 +665,11 @@ export function injectGeminiMcp(home?: string): () => void {
  * Use this when NativecoreService is running in HTTP mode.
  * Returns a cleanup function; must be called when the PTY exits.
  */
-export function injectGeminiMcpUrl(url: string, home?: string): () => void {
+export function injectGeminiMcpUrl(url: string, home?: string, authToken?: string | null): () => void {
   const dir = join(home ?? homedir(), '.gemini');
   const filePath = join(dir, 'settings.json');
   // Gemini CLI only accepts { url } — no type/transport field allowed.
-  return injectMcpToFile(filePath, dir, 'mcpServers', buildGeminiMcpEntryUrl(url) as unknown as Record<string, unknown>);
+  return injectMcpToFile(filePath, dir, 'mcpServers', buildGeminiMcpEntryUrl(url, authToken) as unknown as Record<string, unknown>);
 }
 
 /**
@@ -678,7 +695,7 @@ export function injectOpencodeMcp(home?: string): () => void {
  * Use this when NativecoreService is running in HTTP mode.
  * Returns a cleanup function; must be called when the PTY exits.
  */
-export function injectOpencodeMcpUrl(url: string, home?: string): () => void {
+export function injectOpencodeMcpUrl(url: string, home?: string, authToken?: string | null): () => void {
   const xdgBase = process.env['XDG_CONFIG_HOME'] ?? join(home ?? homedir(), '.config');
   const dir = join(xdgBase, 'opencode');
   const filePath = join(dir, 'opencode.json');
@@ -687,7 +704,7 @@ export function injectOpencodeMcpUrl(url: string, home?: string): () => void {
     filePath,
     dir,
     'mcp',
-    buildOpencodeMcpEntryUrl(url) as unknown as Record<string, unknown>,
+    buildOpencodeMcpEntryUrl(url, authToken) as unknown as Record<string, unknown>,
   );
 }
 
@@ -800,10 +817,14 @@ export function injectPiMcp(): { extensionPath: string; env: Record<string, stri
  *
  * Cleanup is a no-op here; the caller in index.ts calls NativecoreService.release().
  */
-export function injectPiMcpUrl(url: string): { extensionPath: string; env: Record<string, string> } {
+export function injectPiMcpUrl(url: string, authToken?: string | null): { extensionPath: string; env: Record<string, string> } {
+  const env: Record<string, string> = { TDAY_DEVTOOLS_URL: url };
+  if (authToken) {
+    env['TDAY_DEVTOOLS_AUTH_TOKEN'] = authToken;
+  }
   return {
     extensionPath: bridgeExtensionPath(),
-    env: { TDAY_DEVTOOLS_URL: url },
+    env,
   };
 }
 
@@ -1034,6 +1055,7 @@ function writeProxyError(
  */
 export function startMcpSessionProxy(
   nativecoreOrigin: string,
+  authToken?: string,
 ): Promise<{ proxyBaseUrl: string; stop: () => void }> {
   let sessionId: string | null = null;
   let cachedInitBody: Buffer | null = null;
@@ -1055,11 +1077,14 @@ export function startMcpSessionProxy(
   ): Promise<{ status: number; resHeaders: http.IncomingHttpHeaders; body: Buffer }> =>
     new Promise((resolve, reject) => {
       const targetUrl = `${nativecoreOrigin}${path}`;
+      const headers: Record<string, string> = { ...reqHeaders, 'content-length': String(body.length) };
+      // Inject auth header for every upstream request when a token is configured.
+      if (authToken) headers['authorization'] = `Bearer ${authToken}`;
       const req = http.request(
         targetUrl,
         {
           method,
-          headers: { ...reqHeaders, 'content-length': String(body.length) },
+          headers,
           agent: upstreamAgent,
         },
         (res) => {
@@ -1093,6 +1118,8 @@ export function startMcpSessionProxy(
         fwdHeaders[lk] = Array.isArray(v) ? v.join(', ') : (v ?? '');
       }
       fwdHeaders['host'] = new URL(nativecoreOrigin).host;
+      // Inject auth header for every upstream request when a token is configured.
+      if (authToken) fwdHeaders['authorization'] = `Bearer ${authToken}`;
 
       // Non-POST (GET for SSE notifications, DELETE for session close): pipe directly
       if (method !== 'POST') {

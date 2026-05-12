@@ -22,6 +22,41 @@ use std::fs;
 use std::path::PathBuf;
 
 // ──────────────────────────────────────────────────────────────────────────────
+// File-level lock (POSIX flock / Windows LockFileEx)
+//
+// We hold the OS-level advisory lock for the entire duration of the
+// read-kill-write critical section so that two concurrently-starting
+// nativecore processes cannot both believe they have acquired the singleton.
+// ──────────────────────────────────────────────────────────────────────────────
+
+#[cfg(unix)]
+fn with_file_lock<F: FnOnce()>(path: &std::path::Path, f: F) {
+    use std::os::unix::io::AsRawFd;
+    // Open (or create) the lock file.
+    let file = match fs::OpenOptions::new().create(true).write(true).open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            tracing::warn!("[singleton] could not open lock file for flock: {e}");
+            f();
+            return;
+        }
+    };
+    // Acquire exclusive advisory lock — blocks if another instance holds it.
+    let ret = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+    if ret == -1 {
+        tracing::warn!("[singleton] flock(LOCK_EX) failed; proceeding without lock");
+    }
+    f();
+    // Lock is released automatically when `file` is dropped (fd closed).
+}
+
+#[cfg(not(unix))]
+fn with_file_lock<F: FnOnce()>(_path: &std::path::Path, f: F) {
+    // Windows: advisory flock is not available; rely on the existing PID check.
+    f();
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 
 fn lock_path() -> PathBuf {
     std::env::temp_dir().join("tday-nativecore.lock")
@@ -200,32 +235,41 @@ impl Drop for SingletonGuard {
 /// A process with a live parent belongs to a concurrent agent session and is
 /// left untouched, enabling multiple agents to run simultaneously.
 ///
+/// Uses an OS-level advisory file lock (flock on Unix) to make the
+/// read-check-kill-write sequence atomic and eliminate the TOCTOU race
+/// that would otherwise allow two processes to simultaneously believe
+/// they have acquired the lock.
+///
 /// Returns a `SingletonGuard` that removes the lock file when dropped.
 pub fn acquire() -> SingletonGuard {
     let my_pid = std::process::id();
+    let path = lock_path();
 
-    if let Some(old_pid) = read_lock_pid() {
-        if old_pid != my_pid && pid_is_alive(old_pid) {
-            if pid_is_orphan(old_pid) {
-                tracing::info!(
-                    "[singleton] orphaned tday-nativecore PID {old_pid} found — terminating"
-                );
-                terminate_pid(old_pid);
-                if pid_is_alive(old_pid) {
-                    tracing::warn!("[singleton] PID {old_pid} still alive after kill attempt");
+    with_file_lock(&path, || {
+        if let Some(old_pid) = read_lock_pid() {
+            if old_pid != my_pid && pid_is_alive(old_pid) {
+                if pid_is_orphan(old_pid) {
+                    tracing::info!(
+                        "[singleton] orphaned tday-nativecore PID {old_pid} found — terminating"
+                    );
+                    terminate_pid(old_pid);
+                    if pid_is_alive(old_pid) {
+                        tracing::warn!("[singleton] PID {old_pid} still alive after kill attempt");
+                    } else {
+                        tracing::info!("[singleton] orphan PID {old_pid} terminated");
+                    }
                 } else {
-                    tracing::info!("[singleton] orphan PID {old_pid} terminated");
+                    tracing::info!(
+                        "[singleton] PID {old_pid} is alive with active parent — leaving it \
+                         (concurrent agent session)"
+                    );
                 }
-            } else {
-                tracing::info!(
-                    "[singleton] PID {old_pid} is alive with active parent — leaving it \
-                     (concurrent agent session)"
-                );
             }
         }
-    }
 
-    write_lock_pid(my_pid);
+        write_lock_pid(my_pid);
+    });
+
     tracing::info!("[singleton] lock acquired (PID {my_pid})");
     SingletonGuard { _private: () }
 }

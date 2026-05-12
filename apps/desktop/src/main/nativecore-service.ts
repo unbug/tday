@@ -19,6 +19,7 @@
  * stdout before accepting any connections.
  */
 
+import { randomBytes } from 'node:crypto';
 import { type ChildProcess, spawn } from 'node:child_process';
 import { devToolsBinaryPath } from './computer-use';
 
@@ -42,6 +43,8 @@ class NativecoreServiceImpl {
   private _killTimer: ReturnType<typeof setTimeout> | null = null;
   private _status: NativecoreStatus = 'stopped';
   private _lastError: string | null = null;
+  /** Per-process random bearer token to authenticate MCP requests. */
+  private _authToken: string | null = null;
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -111,6 +114,14 @@ class NativecoreServiceImpl {
     return `http://127.0.0.1:${this._port}/mcp`;
   }
 
+  /**
+   * Returns the bearer auth token for the current process, or null if none.
+   * Callers should include this as `Authorization: Bearer <token>` when connecting.
+   */
+  getAuthToken(): string | null {
+    return this._authToken;
+  }
+
   /** True when the process is running and the port is known. */
   get isRunning(): boolean {
     return this.proc !== null && this._port !== null;
@@ -142,7 +153,13 @@ class NativecoreServiceImpl {
         return;
       }
 
-      const proc = spawn(bin, ['--port', '0'], {
+      // Generate a cryptographically-random bearer token for this process
+      // instance.  The token is passed via --auth-token and must be sent by
+      // all MCP clients in the Authorization header.
+      const authToken = randomBytes(32).toString('hex');
+      this._authToken = authToken;
+
+      const proc = spawn(bin, ['--port', '0', '--auth-token', authToken], {
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: false,
         // On Windows, hide the console window that would otherwise flash briefly.
@@ -163,6 +180,7 @@ class NativecoreServiceImpl {
           this._startPromise = null;
           this._status = 'stopped';
           this._lastError = err.message;
+          this._authToken = null;
           reject(err);
         } else {
           this._port = port!;
@@ -173,17 +191,24 @@ class NativecoreServiceImpl {
       };
 
       // Read port announcement from stdout line by line.
-      proc.stdout!.on('data', (chunk: Buffer) => {
-        stdoutBuf += chunk.toString('utf8');
-        const m = /NATIVECORE_PORT:(\d+)/.exec(stdoutBuf);
-        if (m) {
-          const port = parseInt(m[1], 10);
-          settle(undefined, port);
-        }
-      });
+      // proc.stdout is always non-null when stdio includes 'pipe', but guard
+      // defensively to avoid a crash if the spawn configuration changes.
+      if (proc.stdout) {
+        proc.stdout.on('data', (chunk: Buffer) => {
+          stdoutBuf += chunk.toString('utf8');
+          const m = /NATIVECORE_PORT:(\d+)/.exec(stdoutBuf);
+          if (m) {
+            const port = parseInt(m[1], 10);
+            settle(undefined, port);
+          }
+        });
+      } else {
+        settle(new Error('[NativecoreService] stdout is null — cannot read NATIVECORE_PORT'));
+        return;
+      }
 
       // Forward nativecore logs (stderr) to Electron's own stderr for debugging.
-      proc.stderr!.on('data', (chunk: Buffer) => process.stderr.write(chunk));
+      proc.stderr?.on('data', (chunk: Buffer) => process.stderr.write(chunk));
 
       proc.on('error', (err) => {
         settle(new Error(`[NativecoreService] Spawn error: ${err.message}`));
@@ -228,6 +253,7 @@ class NativecoreServiceImpl {
       this.proc = null;
       this._port = null;
       this._startPromise = null;
+      this._authToken = null;
       this._status = 'stopping';
       try { p.kill(); } catch { /* already dead */ }
       if (this._refCount === 0) {

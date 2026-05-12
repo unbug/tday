@@ -1,7 +1,14 @@
 import { memo, useMemo } from 'react';
-import { marked } from 'marked';
+import { marked, Renderer } from 'marked';
 
-marked.setOptions({ breaks: true });
+// Disable raw HTML pass-through so that untrusted markdown content cannot
+// inject <script>, event handlers, or other malicious HTML into the page.
+// This is important because MiniMarkdown is used to render CoWorker
+// descriptions and cron prompts that may originate from untrusted sources.
+const safeRenderer = new Renderer();
+// Override the `html` renderer to strip raw HTML blocks entirely.
+safeRenderer.html = () => '';
+marked.use({ breaks: true, renderer: safeRenderer });
 
 export function MiniMarkdown({ text, className }: { text: string; className?: string }) {
   const html = useMemo(() => marked.parse(text) as string, [text]);
