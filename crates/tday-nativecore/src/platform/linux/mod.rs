@@ -28,6 +28,6 @@ pub use screenshot::{capture_region, capture_screen, capture_window, capture_win
 pub use atspi::{
     AXRef, ax_click, ax_find_text, ax_perform_action, ax_select, ax_set_value,
     element_at_point, frontmost_pid, pid_for_window, raise_windows, resize_window_by_pid,
-    take_snapshot, ax_find_elements, ax_get_focused,
+    take_snapshot, ax_find_elements, ax_get_focused, ElementInfo,
 };
 pub use window::{find_window_by_id_direct, find_windows_by_app, list_windows};

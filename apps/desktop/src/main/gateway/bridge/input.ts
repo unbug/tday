@@ -234,8 +234,7 @@ export function resolveThinkingForAssistantText(
  */
 export function stripReasoningContent(input: unknown): unknown {
   if (!Array.isArray(input)) return input;
-  const str = JSON.stringify(input);
-  if (!str.includes('reasoning_content')) return input;
+  if (!input.some((item) => item && typeof item === 'object' && 'reasoning_content' in (item as object))) return input;
   return input.map((item) => {
     if (!item || typeof item !== 'object') return item;
     const obj = item as Obj;

@@ -117,7 +117,7 @@ function isDirty(
 ): boolean {
   const stored = scanState[agentId];
   if (!stored) return true;
-  const maxMtime = files.length > 0 ? Math.max(...files.map((f) => f.mtime)) : 0;
+  const maxMtime = files.reduce((m, f) => f.mtime > m ? f.mtime : m, 0);
   return files.length !== stored.fileCount || maxMtime !== stored.maxMtime;
 }
 
@@ -159,7 +159,7 @@ function runRefresh(): Promise<void> {
       const scanned = watcher.scan();
       nativeByAgent.set(watcher.agentId, scanned);
 
-      const maxMtime = files.length > 0 ? Math.max(...files.map((f) => f.mtime)) : 0;
+      const maxMtime = files.reduce((m, f) => f.mtime > m ? f.mtime : m, 0);
       store.scanState[watcher.agentId] = {
         fileCount: files.length,
         maxMtime,

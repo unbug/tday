@@ -27,7 +27,7 @@ pub use macos::{
     // AX
     ax_click, ax_find_text, ax_perform_action, ax_select, ax_set_value, element_at_point,
     frontmost_pid, pid_for_window, raise_windows, resize_window_by_pid, take_snapshot, AXRef,
-    ax_find_elements, ax_get_focused,
+    ax_find_elements, ax_get_focused, ElementInfo,
     // Display
     backing_scale_for_point, get_displays, get_main_display, screenshot_px_to_screen,
     // Input
@@ -55,7 +55,7 @@ pub use windows::{
     // AX
     ax_click, ax_find_text, ax_perform_action, ax_select, ax_set_value, element_at_point,
     frontmost_pid, pid_for_window, raise_windows, resize_window_by_pid, take_snapshot, AXRef,
-    ax_find_elements, ax_get_focused,
+    ax_find_elements, ax_get_focused, ElementInfo,
     // Display
     backing_scale_for_point, get_displays, get_main_display, screenshot_px_to_screen,
     // Input
@@ -83,7 +83,7 @@ pub use linux::{
     // AX
     ax_click, ax_find_text, ax_perform_action, ax_select, ax_set_value, element_at_point,
     frontmost_pid, pid_for_window, raise_windows, resize_window_by_pid, take_snapshot, AXRef,
-    ax_find_elements, ax_get_focused,
+    ax_find_elements, ax_get_focused, ElementInfo,
     // Display
     backing_scale_for_point, get_displays, get_main_display, screenshot_px_to_screen,
     // Input

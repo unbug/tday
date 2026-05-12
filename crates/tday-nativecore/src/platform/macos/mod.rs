@@ -14,7 +14,7 @@ pub mod window;
 pub use app::*;
 pub use ax::{AXRef, ax_click, ax_perform_action, ax_select, ax_set_value, element_at_point,
              find_text as ax_find_text, frontmost_pid, pid_for_window, raise_windows, take_snapshot,
-             resize_window_by_pid, ax_find_elements, ax_get_focused};
+             resize_window_by_pid, ax_find_elements, ax_get_focused, ElementInfo};
 pub use display::{backing_scale_for_point, get_displays, get_main_display, screenshot_px_to_screen};
 pub use input::{check_accessibility, click, drag, get_cursor_position, move_mouse, press_key,
                 scroll, type_text, MouseButton};

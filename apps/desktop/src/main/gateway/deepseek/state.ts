@@ -22,8 +22,10 @@ const DEFAULT_LIMIT = 1024;
 export class ThinkingState {
   private readonly records = new Map<string, ThinkingEntry>();
   private readonly recordOrder: string[] = [];
+  private recordHead = 0;
   private readonly textRecords = new Map<string, ThinkingEntry>();
   private readonly textOrder: string[] = [];
+  private textHead = 0;
   private readonly limit: number;
 
   constructor(limit = DEFAULT_LIMIT) {
@@ -112,12 +114,12 @@ export class ThinkingState {
   // ─── Private ──────────────────────────────────────────────────────────────
 
   private prune(): void {
-    while (this.recordOrder.length > this.limit) {
-      const id = this.recordOrder.shift()!;
+    while (this.recordOrder.length - this.recordHead > this.limit) {
+      const id = this.recordOrder[this.recordHead++];
       this.records.delete(id);
     }
-    while (this.textOrder.length > this.limit) {
-      const key = this.textOrder.shift()!;
+    while (this.textOrder.length - this.textHead > this.limit) {
+      const key = this.textOrder[this.textHead++];
       this.textRecords.delete(key);
     }
   }

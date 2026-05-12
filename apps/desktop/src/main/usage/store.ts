@@ -35,8 +35,17 @@ function loadUserPricing(): Record<string, ModelPricing> {
   return {};
 }
 
+let _cachedPricing: Record<string, ModelPricing> | null = null;
+
 function mergedPricing(): Record<string, ModelPricing> {
-  return { ...BUILTIN_PRICING, ...loadUserPricing() };
+  if (_cachedPricing) return _cachedPricing;
+  _cachedPricing = { ...BUILTIN_PRICING, ...loadUserPricing() };
+  return _cachedPricing;
+}
+
+/** Invalidate the pricing cache (call after user updates pricing.json). */
+export function invalidatePricingCache(): void {
+  _cachedPricing = null;
 }
 
 /** Append one usage record to the JSONL log. Non-throwing. */
@@ -150,8 +159,12 @@ export function computeUsageSummary(records: UsageRecord[]): UsageSummary {
   const cacheHitRate = promptTokens > 0 ? totalCachedTokens / promptTokens : 0;
 
   // Compute token throughput: total tokens / span of actual records in minutes.
-  const tsValues = records.map((r) => r.ts);
-  const spanMs = tsValues.length > 1 ? Math.max(...tsValues) - Math.min(...tsValues) : 0;
+  let minTs = Infinity, maxTs = -Infinity;
+  for (const r of records) {
+    if (r.ts < minTs) minTs = r.ts;
+    if (r.ts > maxTs) maxTs = r.ts;
+  }
+  const spanMs = records.length > 1 ? maxTs - minTs : 0;
   const spanMin = Math.max(1, spanMs / 60_000);
   const throughputTokensPerMin = (totalInputTokens + totalOutputTokens) / spanMin;
 

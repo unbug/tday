@@ -58,12 +58,12 @@ async function persistSettings(snapshot: SettingsMap): Promise<void> {
   ensureDir();
   const tmp = join(TDAY_DIR, `.settings-${randomUUID()}.tmp`);
   try {
-    await writeFileAsync(tmp, JSON.stringify(snapshot, null, 2), 'utf8');
+    await writeFileAsync(tmp, JSON.stringify(snapshot), 'utf8');
     await renameAsync(tmp, SETTINGS_FILE);
   } catch {
     // Fallback: direct write (non-atomic but better than nothing)
     try {
-      writeFileSync(SETTINGS_FILE, JSON.stringify(snapshot, null, 2), 'utf8');
+      writeFileSync(SETTINGS_FILE, JSON.stringify(snapshot), 'utf8');
     } catch { /* ignore */ }
   }
 }

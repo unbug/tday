@@ -24,36 +24,31 @@ pub async fn handle_take_screenshot(
 ) -> Result<Value> {
     let window_id: Option<u32> = params.get("window_id").and_then(|v| v.as_u64()).map(|v| v as u32);
 
-    let (jpeg_bytes, origin_x, origin_y, scale, pw, ph) = tokio::task::spawn_blocking(move || {
+    let (jpeg_bytes, png_data, origin_x, origin_y, scale, pw, ph) = tokio::task::spawn_blocking(move || {
         match window_id {
-            Some(wid) => platform::capture_window_cg_jpeg(wid),
+            Some(wid) => {
+                let (jpeg, ox, oy, sc, pw, ph) = platform::capture_window_cg_jpeg(wid)?;
+                // Decode JPEG once to get PNG for the cache
+                let img = image::load_from_memory(&jpeg)
+                    .map_err(|e| format!("jpeg→png: {e}"))?;
+                let mut png = Vec::new();
+                img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+                    .map_err(|e| format!("png encode: {e}"))?;
+                Ok::<_, String>((jpeg, png, ox, oy, sc, pw, ph))
+            }
             None => {
-                // Full screen JPEG
+                // Full screen: capture gives us PNG directly
                 let ss = platform::capture_screen()
                     .map_err(|e| format!("capture_screen: {e}"))?;
-                // encode screen capture as jpeg
-                let mut out = Vec::new();
+                // Encode JPEG for sending to client
                 let img = image::load_from_memory(&ss.png_data)
                     .map_err(|e| format!("decode: {e}"))?;
-                img.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Jpeg)
+                let mut jpeg = Vec::new();
+                img.write_to(&mut std::io::Cursor::new(&mut jpeg), image::ImageFormat::Jpeg)
                     .map_err(|e| format!("jpeg: {e}"))?;
-                Ok::<_, String>((out, ss.origin_x, ss.origin_y, ss.scale_factor,
+                Ok::<_, String>((jpeg, ss.png_data, ss.origin_x, ss.origin_y, ss.scale_factor,
                     ss.pixel_width, ss.pixel_height))
             }
-        }
-    }).await.map_err(|e| DevToolsError::Other(format!("task: {e}")))?
-        .map_err(DevToolsError::Screenshot)?;
-
-    // Store PNG copy in cache (re-decode jpeg → png for find_image)
-    let png_data = tokio::task::spawn_blocking({
-        let jb = jpeg_bytes.clone();
-        move || {
-            let img = image::load_from_memory(&jb)
-                .map_err(|e| format!("jpeg→png: {e}"))?;
-            let mut png = Vec::new();
-            img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
-                .map_err(|e| format!("png encode: {e}"))?;
-            Ok::<_, String>(png)
         }
     }).await.map_err(|e| DevToolsError::Other(format!("task: {e}")))?
         .map_err(DevToolsError::Screenshot)?;

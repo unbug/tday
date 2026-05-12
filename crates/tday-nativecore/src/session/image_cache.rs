@@ -4,7 +4,7 @@
 
 /// LRU image cache for find_image template images (load_image tool).
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 const MAX_ENTRIES: usize = 20;
 
@@ -14,10 +14,18 @@ pub struct CachedImage {
     pub png_data: Vec<u8>,
 }
 
-#[derive(Default)]
+/// LRU cache: `map` provides O(1) lookup by id; `order` is a VecDeque of ids
+/// in insertion/access order (front = oldest, back = newest).
 pub struct ImageCache {
-    entries: VecDeque<CachedImage>,
+    map:     HashMap<String, Vec<u8>>,
+    order:   VecDeque<String>,
     counter: u64,
+}
+
+impl Default for ImageCache {
+    fn default() -> Self {
+        Self { map: HashMap::new(), order: VecDeque::new(), counter: 0 }
+    }
 }
 
 impl ImageCache {
@@ -25,22 +33,24 @@ impl ImageCache {
     pub fn store(&mut self, png_data: Vec<u8>) -> String {
         self.counter += 1;
         let id = format!("img_{}", self.counter);
-        if self.entries.len() >= MAX_ENTRIES {
-            self.entries.pop_front();
+        if self.map.len() >= MAX_ENTRIES {
+            if let Some(evicted) = self.order.pop_front() {
+                self.map.remove(&evicted);
+            }
         }
-        self.entries.push_back(CachedImage { id: id.clone(), png_data });
+        self.map.insert(id.clone(), png_data);
+        self.order.push_back(id.clone());
         id
     }
 
-    /// Get (LRU bump via move-to-back).
+    /// Get with LRU bump (move to back of order queue).
     pub fn get(&mut self, id: &str) -> Option<CachedImage> {
-        if let Some(pos) = self.entries.iter().position(|e| e.id == id) {
-            let entry = self.entries.remove(pos)?;
-            let cloned = entry.clone();
-            self.entries.push_back(entry);
-            Some(cloned)
-        } else {
-            None
+        let png_data = self.map.get(id)?.clone();
+        // Move to back: remove from current position (O(n)) and push to back.
+        if let Some(pos) = self.order.iter().position(|k| k == id) {
+            self.order.remove(pos);
         }
+        self.order.push_back(id.to_string());
+        Some(CachedImage { id: id.to_string(), png_data })
     }
 }

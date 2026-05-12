@@ -262,13 +262,24 @@ fn element_at_point_for_hover(
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     {
         let info = crate::platform::element_at_point(x, y, app_name)?;
-        let value = serde_json::to_value(&info).map_err(|e| e.to_string())?;
-        Ok(parse_hover_element(&value))
+        Ok(hover_element_from_info(info))
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
         let _ = (x, y, app_name);
         Err("Hover tracking is not supported on this platform".to_string())
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+fn hover_element_from_info(info: crate::platform::ElementInfo) -> HoverElement {
+    HoverElement {
+        name:     info.name.map(|s| truncate_field(&s)),
+        role:     info.role.map(|s| truncate_field(&s)),
+        label:    info.description.map(|s| truncate_field(&s)),
+        bounds:   info.bounds.map(|r| ElementBounds { x: r.x, y: r.y, width: r.width, height: r.height }),
+        app_name: info.app_name.map(|s| truncate_field(&s)),
+        pid:      Some(info.pid),
     }
 }
 

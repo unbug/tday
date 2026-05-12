@@ -4,7 +4,7 @@
 
 /// LRU screenshot cache for find_image and coordinate re-use.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 const MAX_ENTRIES: usize = 10;
 
@@ -26,10 +26,17 @@ pub struct CachedScreenshot {
     pub metadata: ScreenshotMeta,
 }
 
-#[derive(Default)]
+/// Cache: `map` provides O(1) lookup by id; `order` tracks eviction order.
 pub struct ScreenshotCache {
-    entries: VecDeque<CachedScreenshot>,
+    map:     HashMap<String, CachedScreenshot>,
+    order:   VecDeque<String>,
     counter: u64,
+}
+
+impl Default for ScreenshotCache {
+    fn default() -> Self {
+        Self { map: HashMap::new(), order: VecDeque::new(), counter: 0 }
+    }
 }
 
 impl ScreenshotCache {
@@ -37,15 +44,18 @@ impl ScreenshotCache {
     pub fn store(&mut self, png_data: Vec<u8>, meta: ScreenshotMeta) -> String {
         self.counter += 1;
         let id = format!("ss_{}", self.counter);
-        if self.entries.len() >= MAX_ENTRIES {
-            self.entries.pop_front();
+        if self.map.len() >= MAX_ENTRIES {
+            if let Some(evicted) = self.order.pop_front() {
+                self.map.remove(&evicted);
+            }
         }
-        self.entries.push_back(CachedScreenshot { id: id.clone(), png_data, metadata: meta });
+        self.order.push_back(id.clone());
+        self.map.insert(id.clone(), CachedScreenshot { id: id.clone(), png_data, metadata: meta });
         id
     }
 
-    /// Peek (no LRU bump) — used by find_image which clones the data immediately.
+    /// Peek (no LRU bump) — O(1) via HashMap.
     pub fn peek(&self, id: &str) -> Option<&CachedScreenshot> {
-        self.entries.iter().find(|e| e.id == id)
+        self.map.get(id)
     }
 }

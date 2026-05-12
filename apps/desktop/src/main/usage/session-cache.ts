@@ -207,14 +207,14 @@ function statFiles(files: string[]): { fileCount: number; maxMtime: number } {
   return { fileCount: files.length, maxMtime };
 }
 
-/** Returns true if the agent has new or modified session files since last scan. */
-function isAgentDirty(watcher: AgentWatcher, index: SessionIndex): boolean {
+/** Returns `{ dirty, files }` for the given watcher. */
+function isAgentDirty(watcher: AgentWatcher, index: SessionIndex): { dirty: boolean; files: string[] } {
   const entry = index.agents[watcher.agentId];
-  if (!entry) return true; // never scanned yet
-
   const files = watcher.collectFiles();
+  if (!entry) return { dirty: true, files }; // never scanned yet
+
   const { fileCount, maxMtime } = statFiles(files);
-  return fileCount !== entry.fileCount || maxMtime > entry.maxMtime;
+  return { dirty: fileCount !== entry.fileCount || maxMtime > entry.maxMtime, files };
 }
 
 // ── Cache read / write ───────────────────────────────────────────────────────
@@ -292,7 +292,11 @@ async function doRefresh(): Promise<void> {
     const index = loadIndex();
 
     // Determine dirty agents using stat-only walk (no file reads yet).
-    const dirtyWatchers = AGENT_WATCHERS.filter((w) => isAgentDirty(w, index));
+    const dirtyWatchers: Array<{ watcher: AgentWatcher; files: string[] }> = [];
+    for (const w of AGENT_WATCHERS) {
+      const { dirty, files } = isAgentDirty(w, index);
+      if (dirty) dirtyWatchers.push({ watcher: w, files });
+    }
     if (dirtyWatchers.length === 0) return;
 
     // Load existing cache grouped by agentId.
@@ -307,15 +311,14 @@ async function doRefresh(): Promise<void> {
     }
 
     // Re-scan each dirty agent.
-    for (const watcher of dirtyWatchers) {
+    for (const { watcher, files } of dirtyWatchers) {
       // Yield to the event loop between agents so IPC and UI remain responsive.
       await new Promise<void>((resolve) => setImmediate(resolve));
 
       const freshRecords = watcher.scan();
       agentRecords.set(watcher.agentId, freshRecords);
 
-      // Update dirty-check watermarks for this agent.
-      const files = watcher.collectFiles();
+      // Update dirty-check watermarks for this agent (reuse already-stat'd file list).
       const { fileCount, maxMtime } = statFiles(files);
       index.agents[watcher.agentId] = {
         lastScanTs: Date.now(),
