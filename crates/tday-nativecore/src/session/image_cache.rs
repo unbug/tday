@@ -14,11 +14,18 @@ pub struct CachedImage {
     pub png_data: Vec<u8>,
 }
 
-#[derive(Default)]
+/// LRU cache: `map` provides O(1) lookup by id; `order` is a VecDeque of ids
+/// in insertion/access order (front = oldest, back = newest).
 pub struct ImageCache {
-    entries: VecDeque<CachedImage>,
-    index:   HashMap<String, usize>, // id → position in entries
+    map:     HashMap<String, Vec<u8>>,
+    order:   VecDeque<String>,
     counter: u64,
+}
+
+impl Default for ImageCache {
+    fn default() -> Self {
+        Self { map: HashMap::new(), order: VecDeque::new(), counter: 0 }
+    }
 }
 
 impl ImageCache {
@@ -26,31 +33,24 @@ impl ImageCache {
     pub fn store(&mut self, png_data: Vec<u8>) -> String {
         self.counter += 1;
         let id = format!("img_{}", self.counter);
-        if self.entries.len() >= MAX_ENTRIES {
-            if let Some(front) = self.entries.pop_front() {
-                self.index.remove(&front.id);
-                // Shift all indices down by 1
-                for v in self.index.values_mut() { *v -= 1; }
+        if self.map.len() >= MAX_ENTRIES {
+            if let Some(evicted) = self.order.pop_front() {
+                self.map.remove(&evicted);
             }
         }
-        self.index.insert(id.clone(), self.entries.len());
-        self.entries.push_back(CachedImage { id: id.clone(), png_data });
+        self.map.insert(id.clone(), png_data);
+        self.order.push_back(id.clone());
         id
     }
 
-    /// Get (LRU bump via move-to-back).
+    /// Get with LRU bump (move to back of order queue).
     pub fn get(&mut self, id: &str) -> Option<CachedImage> {
-        let pos = *self.index.get(id)?;
-        let entry = self.entries.remove(pos)?;
-        let cloned = entry.clone();
-        // Shift all indices that were after `pos` down by 1
-        for v in self.index.values_mut() {
-            if *v > pos { *v -= 1; }
+        let png_data = self.map.get(id)?.clone();
+        // Move to back: remove from current position (O(n)) and push to back.
+        if let Some(pos) = self.order.iter().position(|k| k == id) {
+            self.order.remove(pos);
         }
-        // Move to back
-        let new_pos = self.entries.len();
-        self.index.insert(entry.id.clone(), new_pos);
-        self.entries.push_back(entry);
-        Some(cloned)
+        self.order.push_back(id.to_string());
+        Some(CachedImage { id: id.to_string(), png_data })
     }
 }

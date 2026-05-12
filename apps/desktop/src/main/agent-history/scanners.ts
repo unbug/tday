@@ -26,6 +26,7 @@ import { existsSync, readdirSync, statSync, openSync, readSync, closeSync } from
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 import type { AgentHistoryEntry } from '@tday/shared';
 
 /** Maximum lines scanned per file to extract the title. */
@@ -33,6 +34,7 @@ const MAX_TITLE_SCAN_LINES = 150;
 
 /** Read at most MAX_TITLE_SCAN_LINES lines from a file without loading it fully.
  *  Reads up to 64 KB synchronously — sufficient for 150 JSONL lines in practice.
+ *  Uses StringDecoder to correctly handle multi-byte UTF-8 sequences at the chunk boundary.
  */
 function readFirstLines(filePath: string): string[] {
   const CHUNK_BYTES = 65536; // 64 KB
@@ -41,7 +43,9 @@ function readFirstLines(filePath: string): string[] {
     fd = openSync(filePath, 'r');
     const buf = Buffer.alloc(CHUNK_BYTES);
     const bytesRead = readSync(fd, buf, 0, CHUNK_BYTES, 0);
-    const text = buf.slice(0, bytesRead).toString('utf8');
+    const decoder = new StringDecoder('utf8');
+    // write() handles any incomplete multi-byte sequence at the boundary
+    const text = decoder.write(buf.slice(0, bytesRead));
     const lines = text.split('\n');
     return lines.length > MAX_TITLE_SCAN_LINES ? lines.slice(0, MAX_TITLE_SCAN_LINES) : lines;
   } catch {

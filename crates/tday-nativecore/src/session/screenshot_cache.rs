@@ -26,11 +26,17 @@ pub struct CachedScreenshot {
     pub metadata: ScreenshotMeta,
 }
 
-#[derive(Default)]
+/// Cache: `map` provides O(1) lookup by id; `order` tracks eviction order.
 pub struct ScreenshotCache {
-    entries: VecDeque<CachedScreenshot>,
-    index:   HashMap<String, usize>, // id → position in entries
+    map:     HashMap<String, CachedScreenshot>,
+    order:   VecDeque<String>,
     counter: u64,
+}
+
+impl Default for ScreenshotCache {
+    fn default() -> Self {
+        Self { map: HashMap::new(), order: VecDeque::new(), counter: 0 }
+    }
 }
 
 impl ScreenshotCache {
@@ -38,21 +44,18 @@ impl ScreenshotCache {
     pub fn store(&mut self, png_data: Vec<u8>, meta: ScreenshotMeta) -> String {
         self.counter += 1;
         let id = format!("ss_{}", self.counter);
-        if self.entries.len() >= MAX_ENTRIES {
-            if let Some(front) = self.entries.pop_front() {
-                self.index.remove(&front.id);
-                // Shift all indices down by 1
-                for v in self.index.values_mut() { *v -= 1; }
+        if self.map.len() >= MAX_ENTRIES {
+            if let Some(evicted) = self.order.pop_front() {
+                self.map.remove(&evicted);
             }
         }
-        self.index.insert(id.clone(), self.entries.len());
-        self.entries.push_back(CachedScreenshot { id: id.clone(), png_data, metadata: meta });
+        self.order.push_back(id.clone());
+        self.map.insert(id.clone(), CachedScreenshot { id: id.clone(), png_data, metadata: meta });
         id
     }
 
-    /// Peek (no LRU bump) — used by find_image which clones the data immediately.
+    /// Peek (no LRU bump) — O(1) via HashMap.
     pub fn peek(&self, id: &str) -> Option<&CachedScreenshot> {
-        let pos = self.index.get(id)?;
-        self.entries.get(*pos)
+        self.map.get(id)
     }
 }

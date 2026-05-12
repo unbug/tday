@@ -62,7 +62,7 @@ const MAX_CONVERSATION_ENTRIES = 500;
 
 /** Evict the oldest entry if the Map exceeds the given limit. */
 function evictOldest<V>(map: Map<string, V>, limit: number): void {
-  if (map.size > limit) {
+  while (map.size > limit) {
     const oldest = map.keys().next().value;
     if (oldest !== undefined) map.delete(oldest);
   }
