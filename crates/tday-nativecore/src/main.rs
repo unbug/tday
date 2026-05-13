@@ -12,8 +12,9 @@ use tday_nativecore::DevToolsServer;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
+    let auth_token = parse_auth_token_arg(&args);
     match parse_port_arg(&args) {
-        Some(port) => start_http_server(port),
+        Some(port) => start_http_server(port, auth_token),
         None       => start_stdio_server(),
     }
 }
@@ -28,6 +29,20 @@ fn parse_port_arg(args: &[String]) -> Option<u16> {
         }
         if let Some(val) = arg.strip_prefix("--port=") {
             return val.parse().ok();
+        }
+    }
+    None
+}
+
+/// Parse `--auth-token TOKEN` or `--auth-token=TOKEN` from argv.
+fn parse_auth_token_arg(args: &[String]) -> Option<String> {
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        if arg == "--auth-token" {
+            return it.next().map(|v| v.clone());
+        }
+        if let Some(val) = arg.strip_prefix("--auth-token=") {
+            return Some(val.to_string());
         }
     }
     None
@@ -74,7 +89,7 @@ async fn start_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
 // ── HTTP mode (shared service for multi-agent) ────────────────────────────────
 
 #[tokio::main]
-async fn start_http_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
+async fn start_http_server(port: u16, auth_token: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     use rmcp::transport::streamable_http_server::{
         session::local::LocalSessionManager,
         StreamableHttpServerConfig,
@@ -124,7 +139,36 @@ async fn start_http_server(port: u16) -> Result<(), Box<dyn std::error::Error>> 
         StreamableHttpServerConfig::default(),
     );
 
-    let router = axum::Router::new().nest_service("/mcp", service);
+    // ── Optional bearer-token authentication ──────────────────────────────────
+    // When an auth token is provided, every request must carry:
+    //   Authorization: Bearer <token>
+    // Requests without a valid token receive 401 Unauthorized.
+    let router = if let Some(token) = auth_token {
+        let token = Arc::new(token);
+        let auth_layer = axum::middleware::from_fn(move |req: axum::http::Request<axum::body::Body>, next: axum::middleware::Next| {
+            let token = token.clone();
+            async move {
+                let auth = req.headers()
+                    .get(axum::http::header::AUTHORIZATION)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("");
+                let expected = format!("Bearer {}", token.as_str());
+                if auth == expected {
+                    next.run(req).await
+                } else {
+                    axum::http::Response::builder()
+                        .status(axum::http::StatusCode::UNAUTHORIZED)
+                        .body(axum::body::Body::from("Unauthorized"))
+                        .unwrap()
+                }
+            }
+        });
+        axum::Router::new()
+            .nest_service("/mcp", service)
+            .layer(auth_layer)
+    } else {
+        axum::Router::new().nest_service("/mcp", service)
+    };
 
     axum::serve(listener, router)
         .with_graceful_shutdown(async {

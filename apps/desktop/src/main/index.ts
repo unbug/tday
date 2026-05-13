@@ -205,6 +205,12 @@ function registerIpc(): void {
 
   // PTY spawn
   ipcMain.handle(IPC.ptySpawn, async (event, req: SpawnRequest) => {
+    // Validate tabId early — it is used to construct file paths and must not
+    // contain path-traversal sequences (e.g. '../', '/', null bytes).
+    if (!/^[\w-]+$/.test(req.tabId)) {
+      throw new Error(`[tday] Invalid tabId — must match [a-zA-Z0-9_-]: "${req.tabId}"`);
+    }
+
     const existing = ptys.get(req.tabId);
     if (existing) {
       try { existing.kill(); } catch { /* already dead */ }
@@ -294,7 +300,8 @@ function registerIpc(): void {
           console.warn('[tday] NativecoreService unavailable for pi, falling back to stdio:', e);
         }
         if (piCuUrl) {
-          const { extensionPath, env: cuEnv } = injectPiMcpUrl(piCuUrl);
+          const piAuthToken = NativecoreService.getAuthToken();
+          const { extensionPath, env: cuEnv } = injectPiMcpUrl(piCuUrl, piAuthToken);
           Object.assign(env, cuEnv);
           args = [...args, '--extension', extensionPath];
           computerUseCleanup = () => NativecoreService.release();
@@ -410,6 +417,7 @@ function registerIpc(): void {
 
         const claudeDir = join(homedir(), '.claude');
         const globalSettingsPath = join(claudeDir, 'settings.json');
+
         // Per-session temp settings file — unique per tab, never collides.
         const sessionSettingsPath = join(claudeDir, `tday-session-${req.tabId}.json`);
         // Separate MCP config file passed via --mcp-config (mcpServers in --settings is ignored by claude-code).
@@ -433,7 +441,8 @@ function registerIpc(): void {
               console.warn('[tday] NativecoreService unavailable for claude-code, falling back to stdio:', e);
             }
             if (cuNativecoreUrl) {
-              applyClaudeCodeMcpUrl(sessionSettings, cuNativecoreUrl, isAnthropicBackend);
+              const ccAuthToken = NativecoreService.getAuthToken();
+              applyClaudeCodeMcpUrl(sessionSettings, cuNativecoreUrl, isAnthropicBackend, ccAuthToken);
               computerUseCleanup = () => NativecoreService.release();
             } else {
               applyClaudeCodeMcp(sessionSettings, isAnthropicBackend);
@@ -513,7 +522,8 @@ function registerIpc(): void {
             console.warn('[tday] NativecoreService unavailable for claude-code (no provider), falling back to stdio:', e);
           }
           if (cuUrl) {
-            applyClaudeCodeMcpUrl(sessionSettings, cuUrl, true);
+            const ccAuthToken2 = NativecoreService.getAuthToken();
+            applyClaudeCodeMcpUrl(sessionSettings, cuUrl, true, ccAuthToken2);
             computerUseCleanup = () => NativecoreService.release();
           } else {
             applyClaudeCodeMcp(sessionSettings, true);
@@ -555,7 +565,8 @@ function registerIpc(): void {
             console.warn('[tday] NativecoreService unavailable for gemini, falling back to stdio:', e);
           }
           if (cuUrl) {
-            const cleanup = injectGeminiMcpUrl(cuUrl);
+            const geminiAuthToken = NativecoreService.getAuthToken();
+            const cleanup = injectGeminiMcpUrl(cuUrl, undefined, geminiAuthToken);
             computerUseCleanup = () => { cleanup(); NativecoreService.release(); };
           } else {
             computerUseCleanup = injectGeminiMcp();
@@ -570,7 +581,8 @@ function registerIpc(): void {
             console.warn('[tday] NativecoreService unavailable for opencode, falling back to stdio:', e);
           }
           if (cuUrl) {
-            const cleanup = injectOpencodeMcpUrl(cuUrl);
+            const opencodeAuthToken = NativecoreService.getAuthToken();
+            const cleanup = injectOpencodeMcpUrl(cuUrl, undefined, opencodeAuthToken);
             computerUseCleanup = () => { cleanup(); NativecoreService.release(); };
           } else {
             computerUseCleanup = injectOpencodeMcp();
@@ -590,8 +602,9 @@ function registerIpc(): void {
           try {
             await NativecoreService.addRef();
             const nativecoreUrl = NativecoreService.getUrl();
+            const codexAuthToken = NativecoreService.getAuthToken();
             if (!nativecoreUrl) throw new Error('NativecoreService not ready');
-            const mcpProxy = await startMcpSessionProxy(nativecoreUrl);
+            const mcpProxy = await startMcpSessionProxy(nativecoreUrl, codexAuthToken ?? undefined);
             mcpProxyStop = mcpProxy.stop;
             // codex MCP URL = proxy base + the /mcp path that nativecore serves
             args.push(...codexMcpCliArgsUrl(mcpProxy.proxyBaseUrl + '/mcp'));
@@ -895,10 +908,21 @@ function registerIpc(): void {
   ipcMain.handle(IPC.coworkerReset, (_e, id: string) => resetBuiltinCoworker(id));
   ipcMain.handle(IPC.coworkerFetchUrl, async (_e, rawUrl: string): Promise<string> => {
     const trimmed = rawUrl.trim();
-    // Local file path: read directly
+    // Local file path: restrict reads to user-owned config/project directories.
+    // Disallow absolute paths that could read arbitrary system files.
     if (trimmed.startsWith('/') || /^[A-Za-z]:[/\\]/.test(trimmed)) {
       const { readFileSync } = await import('fs');
-      return readFileSync(trimmed, 'utf8');
+      const { resolve: resolvePath } = await import('path');
+      const { homedir } = await import('os');
+
+      const resolved = resolvePath(trimmed);
+      const home = homedir();
+      // Only allow reading files inside the user's home directory to prevent
+      // reading sensitive system files such as /etc/passwd or SSH keys.
+      if (!resolved.startsWith(home + '/') && !resolved.startsWith(home + '\\')) {
+        throw new Error(`Reading files outside the home directory is not allowed: ${resolved}`);
+      }
+      return readFileSync(resolved, 'utf8');
     }
     const url = normalizeGitHubUrl(trimmed);
     const res = await fetch(url);

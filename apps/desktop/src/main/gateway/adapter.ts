@@ -58,12 +58,38 @@ export function sessionKeyFromRequest(req: IncomingMessage): string {
   return '';
 }
 
+// ─── Bounded LRU-style map ────────────────────────────────────────────────────
+
+/**
+ * A Map that evicts the oldest entry when it grows beyond `maxSize`.
+ * Insertion order is used as the eviction order (least-recently-inserted first).
+ */
+class BoundedMap<K, V> extends Map<K, V> {
+  constructor(private readonly maxSize: number) { super(); }
+
+  override set(key: K, value: V): this {
+    // If the key already exists, delete it first so the insertion order is
+    // updated (most-recently-used semantics).
+    if (this.has(key)) this.delete(key);
+    super.set(key, value);
+    // Each set() adds at most one entry, so a single eviction step suffices.
+    if (this.size > this.maxSize) {
+      const oldest = this.keys().next().value;
+      if (oldest !== undefined) this.delete(oldest);
+    }
+    return this;
+  }
+}
+
+// Maximum number of conversation / thinking-state entries to keep in memory.
+const MAX_CONVERSATION_ENTRIES = 100;
+
 // ─── Adapter ─────────────────────────────────────────────────────────────────
 
 export class CodexDeepSeekAnthropicAdapter implements GatewayAdapter {
   private readonly proxies = new Map<string, { server: Server; baseUrl: string }>();
-  private readonly conversations = new Map<string, AMessage[]>();
-  private readonly thinkingStates = new Map<string, ThinkingState>();
+  private readonly conversations = new BoundedMap<string, AMessage[]>(MAX_CONVERSATION_ENTRIES);
+  private readonly thinkingStates = new BoundedMap<string, ThinkingState>(MAX_CONVERSATION_ENTRIES);
   /** Maps agentId → last-known cwd for usage attribution. */
   private readonly cwdByAgentId = new Map<string, string>();
 

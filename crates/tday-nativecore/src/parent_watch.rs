@@ -94,7 +94,7 @@ fn macos_kqueue(ppid: u32) {
         return;
     }
 
-    let _ = std::thread::Builder::new()
+    if let Err(e) = std::thread::Builder::new()
         .name("parent-watch".into())
         .spawn(move || unsafe {
             let kq = libc::kqueue();
@@ -157,7 +157,14 @@ fn macos_kqueue(ppid: u32) {
                 tracing::info!("[parent_watch] parent PID {ppid} exited — sending SIGTERM to self");
                 libc::kill(libc::getpid(), libc::SIGTERM);
             }
-        });
+        })
+    {
+        // Thread spawn failed (resource exhaustion).  Nativecore cannot monitor
+        // its parent and will become an orphan if the parent exits without
+        // closing stdin.  Terminate immediately rather than running as a zombie.
+        tracing::error!("[parent_watch] failed to spawn parent-watch thread: {e} — exiting");
+        std::process::exit(1);
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -171,7 +178,7 @@ fn windows_wait(ppid: u32) {
         return;
     }
 
-    let _ = std::thread::Builder::new()
+    if let Err(e) = std::thread::Builder::new()
         .name("parent-watch".into())
         .spawn(move || {
             use windows::Win32::Foundation::CloseHandle;
@@ -198,7 +205,11 @@ fn windows_wait(ppid: u32) {
                 let _ = TerminateProcess(self_h, 0);
                 let _ = CloseHandle(self_h);
             }
-        });
+        })
+    {
+        tracing::error!("[parent_watch] failed to spawn parent-watch thread: {e} — exiting");
+        std::process::exit(1);
+    }
 }
 
 #[cfg(target_os = "windows")]

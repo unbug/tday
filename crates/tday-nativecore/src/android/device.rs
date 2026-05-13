@@ -59,13 +59,19 @@ impl AndroidDevice {
     }
 
     /// Run a shell command from a slice of argument strings.
+    ///
+    /// Each argument is shell-quoted using POSIX single-quote wrapping so that
+    /// metacharacters (`;`, `&`, `|`, `$`, newline, etc.) are never interpreted
+    /// by the Android device shell.
     pub fn shell_args(&mut self, args: &[&str]) -> Result<String, String> {
-        self.shell(&args.join(" "))
+        let quoted: Vec<String> = args.iter().map(|a| shell_quote(a)).collect();
+        self.shell(&quoted.join(" "))
     }
 
     /// Run a shell command and capture raw bytes (used for screenshots).
     pub fn shell_bytes(&mut self, args: &[&str], output: &mut Vec<u8>) -> Result<(), String> {
-        let command = args.join(" ");
+        let quoted: Vec<String> = args.iter().map(|a| shell_quote(a)).collect();
+        let command = quoted.join(" ");
         self.device
             .shell_command(&command, Some(output), None)
             .map_err(|e| format!("Shell command failed: {e}"))?;
@@ -78,6 +84,20 @@ impl AndroidDevice {
             .framebuffer_bytes()
             .map_err(|e| format!("Failed to capture framebuffer: {e}"))
     }
+}
+
+// ── Shell quoting ─────────────────────────────────────────────────────────────
+
+/// Wrap `s` in POSIX single-quotes, escaping any embedded single-quotes as
+/// `'\''` so that shell metacharacters in the value are never interpreted by
+/// the Android device shell.
+pub(crate) fn shell_quote(s: &str) -> String {
+    // Each single-quote inside the string must be:
+    //   1. Close the current single-quoted segment  '
+    //   2. Emit the literal single-quote as "\'"
+    //   3. Re-open a new single-quoted segment      '
+    let inner = s.replace('\'', r"'\''");
+    format!("'{inner}'")
 }
 
 #[cfg(test)]
@@ -93,5 +113,26 @@ mod tests {
         let json = serde_json::to_string(&info).unwrap();
         assert!(json.contains("emulator-5554"));
         assert!(json.contains("device"));
+    }
+
+    #[test]
+    fn shell_quote_plain() {
+        assert_eq!(shell_quote("hello"), "'hello'");
+    }
+
+    #[test]
+    fn shell_quote_with_metacharacters() {
+        assert_eq!(shell_quote("a;b&c|d"), "'a;b&c|d'");
+    }
+
+    #[test]
+    fn shell_quote_with_single_quote() {
+        assert_eq!(shell_quote("it's"), r"'it'\''s'");
+    }
+
+    #[test]
+    fn shell_quote_with_newline() {
+        // Newline inside single-quotes is literal text, not a command terminator.
+        assert_eq!(shell_quote("a\nb"), "'a\nb'");
     }
 }

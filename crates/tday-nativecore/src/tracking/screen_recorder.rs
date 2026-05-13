@@ -56,7 +56,7 @@ impl ScreenRecorder {
 
     #[allow(dead_code)]
     pub fn drain_frames(&self) -> Vec<RecordedFrame> {
-        let mut frames = self.frames.lock().unwrap();
+        let mut frames = self.frames.lock().unwrap_or_else(|e| e.into_inner());
         frames.drain(..).collect()
     }
 
@@ -69,7 +69,7 @@ impl ScreenRecorder {
             self.task_handle.abort();
         }
         self.cancel = CancellationToken::new();
-        let mut buf = self.frames.lock().unwrap();
+        let mut buf = self.frames.lock().unwrap_or_else(|e| e.into_inner());
         buf.drain(..).collect()
     }
 }
@@ -125,7 +125,7 @@ pub fn start_recording(
             match result {
                 Ok(Ok((frame, pid, app_name))) => {
                     app_name_cache.insert(pid, app_name);
-                    frames.lock().unwrap().push(frame);
+                    frames.lock().unwrap_or_else(|e| e.into_inner()).push(frame);
                 }
                 Ok(Err(e)) => {
                     tracing::debug!("Frame capture failed: {e}");
