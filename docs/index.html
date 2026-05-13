@@ -118,6 +118,22 @@
       transition: color .15s;
     }
     .nav-gh:hover { color: var(--text); }
+    .lang-toggle {
+      display: inline-flex;
+      align-items: center;
+      font-size: .78rem;
+      font-weight: 500;
+      color: var(--muted);
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 3px 10px;
+      cursor: pointer;
+      transition: color .15s, border-color .15s;
+      margin-left: 10px;
+      letter-spacing: .02em;
+    }
+    .lang-toggle:hover { color: var(--text); border-color: #3a3a3a; }
 
     /* ── HERO ── */
     .hero {
@@ -433,35 +449,36 @@
 <nav>
   <span class="nav-logo">Tday</span>
   <div class="nav-links">
-    <a href="#features">Features</a>
-    <a href="#screenshots">Screenshots</a>
-    <a href="#download">Download</a>
+    <a href="#features" data-i18n="navFeatures">Features</a>
+    <a href="#screenshots" data-i18n="navScreenshots">Screenshots</a>
+    <a href="#download" data-i18n="navDownload">Download</a>
   </div>
   <a class="nav-gh" href="https://github.com/unbug/tday" target="_blank" rel="noopener">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
     GitHub
   </a>
+  <button class="lang-toggle" id="lang-toggle" aria-label="Switch language">中文</button>
 </nav>
 
 <!-- Hero -->
 <section class="hero">
   <div class="hero-badge">
     <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><circle cx="5" cy="5" r="5"/></svg>
-    Free &amp; Open Source
+    <span data-i18n="badge">Free &amp; Open Source</span>
   </div>
-  <h1>All-in-One<br /><span>Harness Agent Terminal</span></h1>
-  <p>
+  <h1 data-i18n-html="heroH1">All-in-One<br /><span>Harness Agent Terminal</span></h1>
+  <p data-i18n-html="heroP">
     Use Any Model with Every AI Agent — let Claude Code, Codex, Copilot CLI, and others run on <strong style="color:var(--text)">DeepSeek, Ollama, OpenAI</strong>, or any provider —
     all in one multi-tab terminal with unified model config, Computer Use, and cross-agent analytics.
   </p>
   <div class="hero-cta">
     <a id="download-btn" class="btn-primary" href="https://github.com/unbug/tday/releases" target="_blank" rel="noopener">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-      Download for <span id="platform-name">your platform</span>
+      <span data-i18n="downloadFor">Download for </span><span id="platform-name">your platform</span>
     </a>
     <a class="btn-secondary" href="https://github.com/unbug/tday" target="_blank" rel="noopener">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
-      View on GitHub
+      <span data-i18n="viewGithub">View on GitHub</span>
     </a>
   </div>
   <p class="platform-hint" id="platform-hint"></p>
@@ -491,13 +508,13 @@
       loading="eager"
     />
   </a>
-  <p class="demo-caption"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle;margin-right:4px"><polygon points="5 3 19 12 5 21 5 3"/></svg> Watch the demo on <a href="https://x.com/i/status/2049935301808935356" target="_blank" rel="noopener">X (Twitter)</a></p>
+  <p class="demo-caption"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle;margin-right:4px"><polygon points="5 3 19 12 5 21 5 3"/></svg> <span data-i18n-html="demoCaption">Watch the demo on <a href="https://x.com/i/status/2049935301808935356" target="_blank" rel="noopener">X (Twitter)</a></span></p>
 </div>
 
 <!-- Screenshots -->
 <section class="screenshots" id="screenshots">
-  <p class="section-label">Screenshots</p>
-  <h2 class="section-title">See it in action</h2>
+  <p class="section-label" data-i18n="screenshotsLabel">Screenshots</p>
+  <h2 class="section-title" data-i18n="screenshotsTitle">See it in action</h2>
   <div class="shots-grid">
     <img
       src="https://github.com/user-attachments/assets/c196629b-5ee4-46dd-b1e3-d0ba86ab66b9"
@@ -549,66 +566,66 @@
       height="912"
     />
   </a>
-  <p class="demo-caption"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle;margin-right:4px"><polygon points="5 3 19 12 5 21 5 3"/></svg> Watch the Computer Use demo on <a href="https://x.com/unbug/status/2053469554396025203?s=46&amp;t=eTNYDm1gQQbV--Rjdf18OQ" target="_blank" rel="noopener">X (Twitter)</a></p>
+  <p class="demo-caption"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle;margin-right:4px"><polygon points="5 3 19 12 5 21 5 3"/></svg> <span data-i18n-html="fullshotCaption">Watch the Computer Use demo on <a href="https://x.com/unbug/status/2053469554396025203?s=46&amp;t=eTNYDm1gQQbV--Rjdf18OQ" target="_blank" rel="noopener">X (Twitter)</a></span></p>
 </div>
 
 <!-- Features -->
 <section class="features" id="features">
-  <p class="section-label">Features</p>
-  <h2 class="section-title">Everything you need to run AI agents</h2>
+  <p class="section-label" data-i18n="featuresLabel">Features</p>
+  <h2 class="section-title" data-i18n="featuresTitle">Everything you need to run AI agents</h2>
   <div class="features-grid">
     <div class="feat">
       <div class="feat-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><path d="M9 11l2 2 4-4"/></svg></div>
-      <h3>Computer Use</h3>
-      <p>Give any agent hands on your desktop using native Accessibility APIs — no vision model required. Click, type, scroll, open apps, and control Chrome via CDP.</p>
+      <h3 data-i18n="feat1h3">Computer Use</h3>
+      <p data-i18n="feat1p">Give any agent hands on your desktop using native Accessibility APIs — no vision model required. Click, type, scroll, open apps, and control Chrome via CDP.</p>
     </div>
     <div class="feat">
       <div class="feat-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="9" x2="9" y2="21"/></svg></div>
-      <h3>Multi-Tab Workspace</h3>
-      <p>Open unlimited agent tabs simultaneously, drag to reorder, and set per-tab working directories. Tabs and sessions are fully restored on restart.</p>
+      <h3 data-i18n="feat2h3">Multi-Tab Workspace</h3>
+      <p data-i18n="feat2p">Open unlimited agent tabs simultaneously, drag to reorder, and set per-tab working directories. Tabs and sessions are fully restored on restart.</p>
     </div>
     <div class="feat">
       <div class="feat-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg></div>
-      <h3>Cross-Agent Analytics</h3>
-      <p>Track token usage and estimated costs across every agent and session. Daily chart, model breakdown, and agent breakdown — all stored locally.</p>
+      <h3 data-i18n="feat3h3">Cross-Agent Analytics</h3>
+      <p data-i18n="feat3p">Track token usage and estimated costs across every agent and session. Daily chart, model breakdown, and agent breakdown — all stored locally.</p>
     </div>
     <div class="feat">
       <div class="feat-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="1"/><path d="M16 3v2M8 3v2M3 8h2M3 16h2M8 21v-2M16 21v-2M21 16h-2M21 8h-2"/></svg></div>
-      <h3>9 AI Agent Adapters</h3>
-      <p>First-class support for Claude Code, Codex CLI, GitHub Copilot CLI, Gemini CLI, OpenCode, Pi, Qwen-Code, Crush, and Hermes — each with auto-detect and install.</p>
+      <h3 data-i18n="feat4h3">9 AI Agent Adapters</h3>
+      <p data-i18n="feat4p">First-class support for Claude Code, Codex CLI, GitHub Copilot CLI, Gemini CLI, OpenCode, Pi, Qwen-Code, Crush, and Hermes — each with auto-detect and install.</p>
     </div>
     <div class="feat">
       <div class="feat-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
-      <h3>CoWorker Personas</h3>
-      <p>Inject specialist role system prompts into any agent tab instantly. Built-in roles, online presets (Karpathy, Devin-style, Analyst), or your own custom text.</p>
+      <h3 data-i18n="feat5h3">CoWorker Personas</h3>
+      <p data-i18n="feat5p">Inject specialist role system prompts into any agent tab instantly. Built-in roles, online presets (Karpathy, Devin-style, Analyst), or your own custom text.</p>
     </div>
     <div class="feat">
       <div class="feat-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg></div>
-      <h3>28-Provider Settings</h3>
-      <p>Configure DeepSeek, OpenAI, Anthropic, Gemini, xAI, Groq, Ollama, LM Studio, OpenRouter, and 18 more — with local inference auto-discovery.</p>
+      <h3 data-i18n="feat6h3">28-Provider Settings</h3>
+      <p data-i18n="feat6p">Configure DeepSeek, OpenAI, Anthropic, Gemini, xAI, Groq, Ollama, LM Studio, OpenRouter, and 18 more — with local inference auto-discovery.</p>
     </div>
     <div class="feat">
       <div class="feat-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg></div>
-      <h3>Unified History</h3>
-      <p>Every conversation across all agents is captured and indexed. Search by content or agent, and restore any past session including its working directory.</p>
+      <h3 data-i18n="feat7h3">Unified History</h3>
+      <p data-i18n="feat7p">Every conversation across all agents is captured and indexed. Search by content or agent, and restore any past session including its working directory.</p>
     </div>
     <div class="feat">
       <div class="feat-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
-      <h3>Cron Scheduler</h3>
-      <p>Schedule automated agent tasks with Interval, At Time, or Custom cron modes. Human-readable preview and run-count dashboard included.</p>
+      <h3 data-i18n="feat8h3">Cron Scheduler</h3>
+      <p data-i18n="feat8p">Schedule automated agent tasks with Interval, At Time, or Custom cron modes. Human-readable preview and run-count dashboard included.</p>
     </div>
     <div class="feat">
       <div class="feat-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></div>
-      <h3>Cross-Platform</h3>
-      <p>Runs natively on macOS (arm64 + x64), Windows x64, and Linux x64. Full PTY terminal with xterm.js, correct resize handling, and native menus.</p>
+      <h3 data-i18n="feat9h3">Cross-Platform</h3>
+      <p data-i18n="feat9p">Runs natively on macOS (arm64 + x64), Windows x64, and Linux x64. Full PTY terminal with xterm.js, correct resize handling, and native menus.</p>
     </div>
   </div>
 </section>
 
 <!-- Download section -->
 <section class="platforms" id="download">
-  <h2>Download Tday</h2>
-  <p>Free and open source — pick your platform below</p>
+  <h2 data-i18n="platformsH2">Download Tday</h2>
+  <p data-i18n="platformsP">Free and open source — pick your platform below</p>
   <div class="platform-cards">
     <div class="platform-card">
       <span class="platform-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.54 9.103 1.519 12.09 1.013 1.46 2.208 3.09 3.792 3.034 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701z"/></svg></span>
@@ -628,13 +645,13 @@
   </div>
   <a class="btn-primary" href="https://github.com/unbug/tday/releases" target="_blank" rel="noopener">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-    View All Releases on GitHub
+    <span data-i18n="viewReleases">View All Releases on GitHub</span>
   </a>
 </section>
 
 <!-- Footer -->
 <footer>
-  <p>
+  <p data-i18n-html="footerText">
     <a href="https://github.com/unbug/tday" target="_blank" rel="noopener">Tday</a>
     is open source under the MIT license ·
     <a href="https://github.com/unbug/tday/releases" target="_blank" rel="noopener">Releases</a>
@@ -647,33 +664,161 @@
 
 <script>
   (function () {
-    var ua = navigator.userAgent || '';
-    var platform = navigator.platform || '';
-    var btn = document.getElementById('download-btn');
-    var nameEl = document.getElementById('platform-name');
-    var hint = document.getElementById('platform-hint');
+    var TRANSLATIONS = {
+      en: {
+        navFeatures: 'Features',
+        navScreenshots: 'Screenshots',
+        navDownload: 'Download',
+        badge: 'Free & Open Source',
+        heroH1: 'All-in-One<br /><span>Harness Agent Terminal</span>',
+        heroP: 'Use Any Model with Every AI Agent \u2014 let Claude Code, Codex, Copilot CLI, and others run on <strong style="color:var(--text)">DeepSeek, Ollama, OpenAI</strong>, or any provider \u2014 all in one multi-tab terminal with unified model config, Computer Use, and cross-agent analytics.',
+        downloadFor: 'Download for ',
+        platformDefault: 'your platform',
+        viewGithub: 'View on GitHub',
+        demoCaption: 'Watch the demo on <a href="https://x.com/i/status/2049935301808935356" target="_blank" rel="noopener">X (Twitter)</a>',
+        screenshotsLabel: 'Screenshots',
+        screenshotsTitle: 'See it in action',
+        fullshotCaption: 'Watch the Computer Use demo on <a href="https://x.com/unbug/status/2053469554396025203?s=46&amp;t=eTNYDm1gQQbV--Rjdf18OQ" target="_blank" rel="noopener">X (Twitter)</a>',
+        featuresLabel: 'Features',
+        featuresTitle: 'Everything you need to run AI agents',
+        feat1h3: 'Computer Use',
+        feat1p: 'Give any agent hands on your desktop using native Accessibility APIs \u2014 no vision model required. Click, type, scroll, open apps, and control Chrome via CDP.',
+        feat2h3: 'Multi-Tab Workspace',
+        feat2p: 'Open unlimited agent tabs simultaneously, drag to reorder, and set per-tab working directories. Tabs and sessions are fully restored on restart.',
+        feat3h3: 'Cross-Agent Analytics',
+        feat3p: 'Track token usage and estimated costs across every agent and session. Daily chart, model breakdown, and agent breakdown \u2014 all stored locally.',
+        feat4h3: '9 AI Agent Adapters',
+        feat4p: 'First-class support for Claude Code, Codex CLI, GitHub Copilot CLI, Gemini CLI, OpenCode, Pi, Qwen-Code, Crush, and Hermes \u2014 each with auto-detect and install.',
+        feat5h3: 'CoWorker Personas',
+        feat5p: 'Inject specialist role system prompts into any agent tab instantly. Built-in roles, online presets (Karpathy, Devin-style, Analyst), or your own custom text.',
+        feat6h3: '28-Provider Settings',
+        feat6p: 'Configure DeepSeek, OpenAI, Anthropic, Gemini, xAI, Groq, Ollama, LM Studio, OpenRouter, and 18 more \u2014 with local inference auto-discovery.',
+        feat7h3: 'Unified History',
+        feat7p: 'Every conversation across all agents is captured and indexed. Search by content or agent, and restore any past session including its working directory.',
+        feat8h3: 'Cron Scheduler',
+        feat8p: 'Schedule automated agent tasks with Interval, At Time, or Custom cron modes. Human-readable preview and run-count dashboard included.',
+        feat9h3: 'Cross-Platform',
+        feat9p: 'Runs natively on macOS (arm64 + x64), Windows x64, and Linux x64. Full PTY terminal with xterm.js, correct resize handling, and native menus.',
+        platformsH2: 'Download Tday',
+        platformsP: 'Free and open source \u2014 pick your platform below',
+        viewReleases: 'View All Releases on GitHub',
+        footerText: '<a href="https://github.com/unbug/tday" target="_blank" rel="noopener">Tday</a> is open source under the MIT license \u00b7 <a href="https://github.com/unbug/tday/releases" target="_blank" rel="noopener">Releases</a> \u00b7 <a href="https://github.com/unbug/tday/issues" target="_blank" rel="noopener">Issues</a> \u00b7 <a href="https://x.com/unbug" target="_blank" rel="noopener">@unbug on X</a>',
+        hintMacArm: 'Downloads a .dmg installer \u00b7 macOS arm64 + x64 available',
+        hintMac: 'Downloads a .dmg installer \u00b7 macOS arm64 + x64 available',
+        hintWin: 'Downloads a .exe installer or .zip archive \u00b7 Windows x64',
+        hintLinux: 'Downloads an .AppImage or .tar.gz \u00b7 Linux x64',
+        hintDefault: 'macOS \u00b7 Windows \u00b7 Linux'
+      },
+      zh: {
+        navFeatures: '功能',
+        navScreenshots: '截图',
+        navDownload: '下载',
+        badge: '免费开源',
+        heroH1: '一站式<br /><span>AI Agent 驾驭终端</span>',
+        heroP: '使用任意模型驱动每款 AI Agent——让 Claude Code、Codex、Copilot CLI 等在 <strong style="color:var(--text)">DeepSeek、Ollama、OpenAI</strong> 或任意服务商上运行——一个多标签终端，统一模型配置，Computer Use，跨 Agent 分析。',
+        downloadFor: '下载 ',
+        platformDefault: '您的平台',
+        viewGithub: '在 GitHub 查看',
+        demoCaption: '在 <a href="https://x.com/i/status/2049935301808935356" target="_blank" rel="noopener">X (Twitter)</a> 上观看演示',
+        screenshotsLabel: '截图',
+        screenshotsTitle: '看实际运行效果',
+        fullshotCaption: '在 <a href="https://x.com/unbug/status/2053469554396025203?s=46&amp;t=eTNYDm1gQQbV--Rjdf18OQ" target="_blank" rel="noopener">X (Twitter)</a> 上观看 Computer Use 演示',
+        featuresLabel: '功能特性',
+        featuresTitle: '运行 AI Agent 所需的一切',
+        feat1h3: 'Computer Use（计算机控制）',
+        feat1p: '通过原生无障碍 API 赋予任意 Agent 操控桌面的能力——无需视觉模型。点击、输入、滚动、打开应用，并通过 CDP 控制 Chrome。',
+        feat2h3: '多标签工作区',
+        feat2p: '同时打开无限个 Agent 标签，拖拽排序，并为每个标签设置工作目录。重启后标签和会话完全恢复。',
+        feat3h3: '跨 Agent 分析',
+        feat3p: '跨所有 Agent 和会话追踪 Token 使用量和估算费用。每日图表、模型分解、Agent 分解——全部本地存储。',
+        feat4h3: '9 款 AI Agent 适配器',
+        feat4p: '原生支持 Claude Code、Codex CLI、GitHub Copilot CLI、Gemini CLI、OpenCode、Pi、Qwen-Code、Crush 和 Hermes——每款均支持自动检测和安装。',
+        feat5h3: '协作者人设',
+        feat5p: '即时向任意 Agent 标签注入专业角色系统提示。内置角色、在线预设（Karpathy、Devin 风格、分析师）或自定义文本。',
+        feat6h3: '28 家服务商配置',
+        feat6p: '配置 DeepSeek、OpenAI、Anthropic、Gemini、xAI、Groq、Ollama、LM Studio、OpenRouter 等 18 家以上——支持本地推理自动发现。',
+        feat7h3: '统一历史记录',
+        feat7p: '捕获并索引所有 Agent 的每一次对话。按内容或 Agent 搜索，并恢复任意历史会话（含工作目录）。',
+        feat8h3: '定时调度器',
+        feat8p: '以间隔、定时或自定义 Cron 模式调度自动化 Agent 任务。包含人类可读预览和运行次数看板。',
+        feat9h3: '跨平台',
+        feat9p: '原生运行于 macOS（arm64 + x64）、Windows x64 和 Linux x64。完整 PTY 终端，基于 xterm.js，正确处理窗口大小变化，支持原生菜单。',
+        platformsH2: '下载 Tday',
+        platformsP: '免费开源 — 选择您的平台',
+        viewReleases: '在 GitHub 查看所有版本',
+        footerText: '<a href="https://github.com/unbug/tday" target="_blank" rel="noopener">Tday</a> 基于 MIT 许可证开源 \u00b7 <a href="https://github.com/unbug/tday/releases" target="_blank" rel="noopener">版本发布</a> \u00b7 <a href="https://github.com/unbug/tday/issues" target="_blank" rel="noopener">问题反馈</a> \u00b7 <a href="https://x.com/unbug" target="_blank" rel="noopener">@unbug on X</a>',
+        hintMacArm: '下载 .dmg 安装包 \u00b7 支持 macOS arm64 + x64',
+        hintMac: '下载 .dmg 安装包 \u00b7 支持 macOS arm64 + x64',
+        hintWin: '下载 .exe 安装包或 .zip 压缩包 \u00b7 Windows x64',
+        hintLinux: '下载 .AppImage 或 .tar.gz \u00b7 Linux x64',
+        hintDefault: 'macOS \u00b7 Windows \u00b7 Linux'
+      }
+    };
+
+    var currentLang = 'en';
     var releases = 'https://github.com/unbug/tday/releases';
 
-    var isMac = /Mac/.test(platform) || /Macintosh/.test(ua);
-    var isWin = /Win/.test(platform) || /Windows/.test(ua);
-    var isLinux = /Linux/.test(platform) && !isMac;
+    function applyPlatformHints(t) {
+      var ua = navigator.userAgent || '';
+      var platform = navigator.platform || '';
+      var btn = document.getElementById('download-btn');
+      var nameEl = document.getElementById('platform-name');
+      var hint = document.getElementById('platform-hint');
 
-    if (isMac) {
-      var isArm = /arm64|aarch64/i.test(ua);
-      nameEl.textContent = isArm ? 'macOS (Apple Silicon)' : 'macOS';
-      hint.textContent = 'Downloads a .dmg installer · macOS arm64 + x64 available';
-    } else if (isWin) {
-      nameEl.textContent = 'Windows';
-      hint.textContent = 'Downloads a .exe installer or .zip archive · Windows x64';
-    } else if (isLinux) {
-      nameEl.textContent = 'Linux';
-      hint.textContent = 'Downloads an .AppImage or .tar.gz · Linux x64';
-    } else {
-      nameEl.textContent = 'your platform';
-      hint.textContent = 'macOS · Windows · Linux';
+      var isMac = /Mac/.test(platform) || /Macintosh/.test(ua);
+      var isWin = /Win/.test(platform) || /Windows/.test(ua);
+      var isLinux = /Linux/.test(platform) && !isMac;
+
+      if (isMac) {
+        var isArm = /arm64|aarch64/i.test(ua);
+        nameEl.textContent = isArm ? 'macOS (Apple Silicon)' : 'macOS';
+        hint.textContent = isArm ? t.hintMacArm : t.hintMac;
+      } else if (isWin) {
+        nameEl.textContent = 'Windows';
+        hint.textContent = t.hintWin;
+      } else if (isLinux) {
+        nameEl.textContent = 'Linux';
+        hint.textContent = t.hintLinux;
+      } else {
+        nameEl.textContent = t.platformDefault;
+        hint.textContent = t.hintDefault;
+      }
+
+      btn.href = releases;
     }
 
-    btn.href = releases;
+    function setLang(lang) {
+      currentLang = lang;
+      var t = TRANSLATIONS[lang];
+      document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+
+      document.querySelectorAll('[data-i18n]').forEach(function (el) {
+        var key = el.getAttribute('data-i18n');
+        if (t[key] !== undefined) el.textContent = t[key];
+      });
+
+      document.querySelectorAll('[data-i18n-html]').forEach(function (el) {
+        var key = el.getAttribute('data-i18n-html');
+        if (t[key] !== undefined) el.innerHTML = t[key];
+      });
+
+      document.getElementById('lang-toggle').textContent = lang === 'zh' ? 'EN' : '中文';
+      document.getElementById('lang-toggle').setAttribute('aria-label', lang === 'zh' ? 'Switch to English' : '切换为中文');
+
+      applyPlatformHints(t);
+
+      try { localStorage.setItem('tday-lang', lang); } catch (e) {}
+    }
+
+    var savedLang;
+    try { savedLang = localStorage.getItem('tday-lang'); } catch (e) {}
+    var browserLang = (navigator.language || '').toLowerCase();
+    var defaultLang = savedLang || (browserLang.indexOf('zh') === 0 ? 'zh' : 'en');
+    setLang(defaultLang);
+
+    document.getElementById('lang-toggle').addEventListener('click', function () {
+      setLang(currentLang === 'en' ? 'zh' : 'en');
+    });
   })();
 </script>
 
