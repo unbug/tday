@@ -179,6 +179,11 @@ export interface AgentInfo {
   model?: string;
   /** True if this agent is configured as the default for new tabs. */
   isDefault?: boolean;
+  /** User-configured executable name or absolute path override (agents.json bin field).
+   *  Undefined when using the built-in default binary name. */
+  bin?: string;
+  /** Resolved absolute path of the effective executable (null when not found on PATH). */
+  resolvedPath?: string | null;
 }
 
 /** Static config loaded from ~/.tday/providers.json (v0.1.0). */

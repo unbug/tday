@@ -170,8 +170,9 @@ function registerIpc(): void {
     const out: AgentInfo[] = [];
     for (const [id, spec] of Object.entries(INSTALL_SPECS) as Array<[AgentId, AgentInstallSpec | undefined]>) {
       const settings = agents.agents?.[id] ?? {};
-      const bin = settings.bin ?? spec?.bin ?? id;
-      const detect = id === 'pi' ? PiAdapter.detect(bin) : detectGeneric(bin);
+      const effectiveBin = settings.bin ?? spec?.bin ?? id;
+      const detect = id === 'pi' ? PiAdapter.detect(effectiveBin) : detectGeneric(effectiveBin);
+      const resolved = resolveExecutable(effectiveBin, process.env);
       out.push({
         id,
         displayName: spec?.displayName ?? id,
@@ -181,6 +182,8 @@ function registerIpc(): void {
         providerId: settings.providerId,
         model: settings.model,
         isDefault: id === defaultId,
+        bin: settings.bin,
+        resolvedPath: resolved.resolved,
       });
     }
     return out;

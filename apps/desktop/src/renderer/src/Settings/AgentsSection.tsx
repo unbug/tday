@@ -13,7 +13,11 @@ function buildAgentsCfg(agentList: AgentInfo[]): AgentsConfig {
     agents: Object.fromEntries(
       agentList.map((a) => [
         a.id,
-        { providerId: a.providerId || undefined, model: a.model || undefined },
+        {
+          bin: a.bin || undefined,
+          providerId: a.providerId || undefined,
+          model: a.model || undefined,
+        },
       ]),
     ) as AgentsConfig['agents'],
   };
@@ -86,6 +90,27 @@ export function AgentsSection({
         persistAgents(synced);
       }
     }
+  };
+
+  const setAgentBin = (agentId: string, bin: string) => {
+    const next = agents.map((a) => (a.id === agentId ? { ...a, bin: bin.trim() || undefined } : a));
+    onAgentsChange(next);
+  };
+
+  const flushAgentBin = () => persistAgents(agents);
+
+  const resetAgentBin = (agentId: string) => {
+    const next = agents.map((a) => (a.id === agentId ? { ...a, bin: undefined } : a));
+    onAgentsChange(next);
+    persistAgents(next);
+  };
+
+  const browseAgentBin = async (agentId: string) => {
+    const picked = await window.tday.pickFile();
+    if (!picked) return;
+    const next = agents.map((a) => (a.id === agentId ? { ...a, bin: picked } : a));
+    onAgentsChange(next);
+    persistAgents(next);
   };
 
   const installAgent = async (agentId: string, action: 'install' | 'update' | 'uninstall') => {
@@ -286,6 +311,43 @@ export function AgentsSection({
                     </datalist>
                   ) : null}
                 </label>
+              </div>
+
+              {/* Path */}
+              <div>
+                <span className="mb-1 block text-[10px] uppercase tracking-wider text-zinc-500">
+                  Path
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    className="input flex-1 font-mono text-[11px]"
+                    placeholder={a.resolvedPath ?? ''}
+                    value={a.bin ?? ''}
+                    onChange={(e) => setAgentBin(a.id, e.target.value)}
+                    onBlur={() => flushAgentBin()}
+                  />
+                  <button
+                    onClick={() => void browseAgentBin(a.id)}
+                    className="shrink-0 rounded-md border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800"
+                    title="Browse for executable"
+                  >
+                    …
+                  </button>
+                  {a.bin ? (
+                    <button
+                      onClick={() => resetAgentBin(a.id)}
+                      className="shrink-0 rounded-md border border-zinc-800 px-2 py-1 text-[11px] text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+                      title="Reset to default path"
+                    >
+                      Reset
+                    </button>
+                  ) : null}
+                </div>
+                {a.resolvedPath ? (
+                  <div className="mt-0.5 truncate text-[11px] text-zinc-500" title={a.resolvedPath}>
+                    {a.resolvedPath}
+                  </div>
+                ) : null}
               </div>
 
               {/* Default for new tabs */}
